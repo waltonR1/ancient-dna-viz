@@ -1,0 +1,10 @@
+README.md
+pyproject.toml
+src/ancient_dna/__init__.py
+src/ancient_dna/io.py
+src/ancient_dna/preprocess.py
+src/ancient_dna.egg-info/PKG-INFO
+src/ancient_dna.egg-info/SOURCES.txt
+src/ancient_dna.egg-info/dependency_links.txt
+src/ancient_dna.egg-info/requires.txt
+src/ancient_dna.egg-info/top_level.txt

@@ -1,0 +1,15 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ancient-dna"
+version = "0.1.0"
+description = "Ancient DNA preprocessing toolkit (Week1)"
+readme = "README.md"
+authors = [{ name = "Your Name" }]
+requires-python = ">=3.9"
+dependencies = ["pandas", "numpy"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
