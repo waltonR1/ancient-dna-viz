@@ -56,14 +56,37 @@ def save_csv(df: pd.DataFrame, path: str | Path, index: bool = False) -> None:
     :param path: 输出文件路径。
     :param index: 是否导出 DataFrame 的行索引（默认 False）。
     :return: None（直接写入文件）。
-    示例:
-        >>> save_csv(X, "data/processed/matrix.csv")
     """
     path = Path(path)
     df.to_csv(path, index=index)
     print(f"[OK] 已导出 → {path.resolve()}")
 
+def merge_matrix_meta(
+    ids: pd.Series,
+    X: pd.DataFrame,
+    meta: pd.DataFrame,
+    id_col_meta: str = "Genetic ID",
+    meta_first: bool = True
+) -> pd.DataFrame:
+    """
+    合并基因型矩阵与注释表，生成“ID + 注释 + SNP”的宽表。
 
+    :param ids: 样本ID序列（列名将统一为 "Genetic ID"）。
+    :param X: SNP矩阵 (pd.DataFrame)，行=样本，列=SNP。
+    :param meta: 注释表（至少包含样本ID列）。
+    :param id_col_meta: 注释表中样本ID列名（默认 "Genetic ID"）。
+    :param meta_first: 是否让注释列在左侧（True）或右侧（False）。
+    :return: 合并后的宽表 DataFrame。
+    """
+    ids_df = pd.DataFrame({"Genetic ID": ids.astype(str).values})
+    df = pd.concat([ids_df, X.reset_index(drop=True)], axis=1)
+    if id_col_meta != "Genetic ID":
+        meta = meta.rename(columns={id_col_meta: "Genetic ID"})
+    if meta_first:
+        merged = meta.merge(df, on="Genetic ID", how="left")
+    else:
+        merged = df.merge(meta, on="Genetic ID", how="left")
+    return merged
 
 
 
@@ -293,56 +316,29 @@ def load_eigenstrat(
     anno = read_anno(anno_path) if anno_path is not None else None
     return ids, X, snp_cols, anno
 
-def merge_matrix_meta(
-    ids: pd.Series,
-    X: pd.DataFrame,
-    meta: pd.DataFrame,
-    id_col_meta: str = "Genetic ID",
-    meta_first: bool = True
-) -> pd.DataFrame:
-    """
-    合并基因型矩阵与注释表，生成“ID + 注释 + SNP”的宽表。
-
-    :param ids: 样本ID序列（列名将统一为 "Genetic ID"）。
-    :param X: SNP矩阵 (pd.DataFrame)，行=样本，列=SNP。
-    :param meta: 注释表（至少包含样本ID列）。
-    :param id_col_meta: 注释表中样本ID列名（默认 "Genetic ID"）。
-    :param meta_first: 是否让注释列在左侧（True）或右侧（False）。
-    :return: 合并后的宽表 DataFrame。
-    """
-    ids_df = pd.DataFrame({"Genetic ID": ids.astype(str).values})
-    df = pd.concat([ids_df, X.reset_index(drop=True)], axis=1)
-    if id_col_meta != "Genetic ID":
-        meta = meta.rename(columns={id_col_meta: "Genetic ID"})
-    if meta_first:
-        merged = meta.merge(df, on="Genetic ID", how="left")
-    else:
-        merged = df.merge(meta, on="Genetic ID", how="left")
-    return merged
-
 
 if __name__ == "__main__":
     ROOT = Path(__file__).resolve().parents[2]
 
-    # try:
-    #     geno_path = ROOT / "data" / "raw" / "Yhaplfiltered40pct 1.csv"
-    #     meta_path = ROOT / "data" / "raw" / "Yhaplfiltered40pct_classes 1.csv"
-    #     ids, X, snp_cols = load_geno(geno_path)
-    #     meta = load_meta(meta_path)
-    #     merged_csv = merge_matrix_meta(ids, X, meta, id_col_meta="Genetic ID", meta_first=True)
-    #     save_csv(merged_csv, ROOT / "data" / "processed" / "merged_csv.csv")
-    # except Exception as e:
-    #     print("[CSV demo skipped]", e)
+    try:
+        geno_path = ROOT / "data" / "raw" / "Yhaplfiltered40pct 1.csv"
+        meta_path = ROOT / "data" / "raw" / "Yhaplfiltered40pct_classes 1.csv"
+        ids, X, snp_cols = load_geno(geno_path)
+        meta = load_meta(meta_path)
+        merged_csv = merge_matrix_meta(ids, X, meta)
+        save_csv(merged_csv, ROOT / "data" / "processed" / "merged_csv.csv")
+    except Exception as e:
+        print("[CSV demo skipped]", e)
 
     # --- EIGENSTRAT 示例 ---
-    try:
-        prefix = ROOT / "data" / "raw" / "v54.1.p1_HO_public"  # 不带后缀
-        print(prefix)
-        anno_path = str(prefix) + ".anno"
-        ids2, X2, snps2, anno2 = load_eigenstrat(prefix, anno_path=anno_path, missing_code=9, missing_as=np.nan)
-        # 如果有与 anno 对应的样本ID列名不同，可在 merge_matrix_meta 中改 id_col_meta
-        merged_eig = merge_matrix_meta(ids2, X2, anno2 if anno2 is not None else pd.DataFrame({"Genetic ID": ids2}),
-                                       id_col_meta="Genetic ID", meta_first=True)
-        save_csv(merged_eig, ROOT / "data" / "processed" / "merged_eigenstrat.csv")
-    except Exception as e:
-        print("[EIGENSTRAT demo skipped]", e)
+    # try:
+    #     prefix = ROOT / "data" / "raw" / "v54.1.p1_HO_public"  # 不带后缀
+    #     print(prefix)
+    #     anno_path = str(prefix) + ".anno"
+    #     ids2, X2, snps2, anno2 = load_eigenstrat(prefix, anno_path=anno_path, missing_code=9, missing_as=np.nan)
+    #     # 如果有与 anno 对应的样本ID列名不同，可在 merge_matrix_meta 中改 id_col_meta
+    #     merged_eig = merge_matrix_meta(ids2, X2, anno2 if anno2 is not None else pd.DataFrame({"Genetic ID": ids2}),
+    #                                    id_col_meta="Genetic ID", meta_first=True)
+    #     save_csv(merged_eig, ROOT / "data" / "processed" / "merged_eigenstrat.csv")
+    # except Exception as e:
+    #     print("[EIGENSTRAT demo skipped]", e)

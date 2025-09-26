@@ -27,7 +27,7 @@ ancient-dna-viz/
 │  ├─ io.py                    # 读写 .csv / .geno/.snp/.ind（后续补）
 │  ├─ preprocess.py            # 缺失率统计/过滤/填补（放你“preprocess_geno”的函数）
 │  ├─ embedding.py             # PCA/UMAP/t-SNE/MDS/Isomap 统一接口
-│  ├─ viz.py                   # 绘图（散点、配色、图例裁剪、导出PNG/SVG）
+│  ├─ visualize.py             # 绘图（散点、配色、图例裁剪、导出PNG/SVG）
 │  ├─ metrics.py               # 可视化质量度量：邻域保持率、信噪比等（可选）
 │  └─ gpu.py                   # GPU 加速的距离/相似度计算（cupy/numba，可选）
 │

@@ -16,9 +16,6 @@ def align_by_id(ids: pd.Series, X: pd.DataFrame, meta: pd.DataFrame, id_col: str
              - meta_aligned: 与 X_aligned 行顺序一致的注释表。
     注意:
         - 若注释表中缺失某些样本，将被自动丢弃；仅保留交集。
-    示例:
-        >>> X2, meta2 = align_by_id(ids, X, meta)
-        >>> X2.shape, meta2.shape
     """
     common = ids[ids.isin(set(meta[id_col]))]
     mask = ids.isin(set(common))
@@ -36,9 +33,6 @@ def compute_missing_rates(X: pd.DataFrame, zero_as_missing: bool = True) -> Tupl
     :return: (sample_missing, snp_missing)
              - sample_missing: 每个样本（行）的缺失率 (0~1)。
              - snp_missing: 每个 SNP（列）的缺失率 (0~1)。
-    示例:
-        >>> sm, cm = compute_missing_rates(X, zero_as_missing=True)
-        >>> float(sm.median()), float(cm.median())
     """
     Z = X.replace(0, np.nan) if zero_as_missing else X
     sample_missing = Z.isna().mean(axis=1)
@@ -62,9 +56,6 @@ def filter_by_missing(
     :param max_sample_missing: 样本级最大缺失率阈值（默认 0.8，保守）。
     :param max_snp_missing: SNP 级最大缺失率阈值（默认 0.8，保守）。
     :return: 过滤后的矩阵 (pd.DataFrame)，索引从 0 重新开始。
-    示例:
-        >>> Xf = filter_by_missing(X, sm, cm, 0.8, 0.8)
-        >>> Xf.shape
     """
     keep_rows = sample_missing <= max_sample_missing
     keep_cols = snp_missing[snp_missing <= max_snp_missing].index
@@ -93,9 +84,6 @@ def impute_missing(X: pd.DataFrame, zero_as_missing: bool = True, method: str = 
     :param zero_as_missing: 是否将 0 视作缺失并转为 NaN（默认 True）。
     :param method: 填补方法（当前实现 'mode'；其它方法请在后续版本扩展）。
     :return: 填补后的矩阵 (pd.DataFrame)。
-    示例:
-        >>> Xi = impute_missing(Xf, zero_as_missing=True, method="mode")
-        >>> Xi.isna().sum().sum()  # 应为 0
     """
     Z = X.replace(0, np.nan) if zero_as_missing else X.copy()
     if method == "mode":
