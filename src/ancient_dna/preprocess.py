@@ -24,17 +24,19 @@ def align_by_id(ids: pd.Series, X: pd.DataFrame, meta: pd.DataFrame, id_col: str
     return X_aligned, meta_aligned
 
 
-def compute_missing_rates(X: pd.DataFrame, zero_as_missing: bool = True) -> Tuple[pd.Series, pd.Series]:
+def compute_missing_rates(X: pd.DataFrame) -> Tuple[pd.Series, pd.Series]:
     """
     计算缺失率（样本维度 & SNP 维度）。
+        - 0 = 参考等位基因
+        - 1 = 变异等位基因
+        - 3 = 缺失
 
     :param X: 基因型矩阵 (pd.DataFrame)。
-    :param zero_as_missing: 若为 True，将 0 视为缺失并转为 NaN 后再计算（古 DNA 常见）。
     :return: (sample_missing, snp_missing)
              - sample_missing: 每个样本（行）的缺失率 (0~1)。
              - snp_missing: 每个 SNP（列）的缺失率 (0~1)。
     """
-    Z = X.replace(0, np.nan) if zero_as_missing else X
+    Z = X.replace(3, np.nan)
     sample_missing = Z.isna().mean(axis=1)
     snp_missing = Z.isna().mean(axis=0)
     return sample_missing, snp_missing
@@ -76,16 +78,15 @@ def _fill_col_mode(col: pd.Series, fallback: float = 1) -> pd.Series:
     return col.fillna(vc.index[0] if len(vc) else fallback)
 
 
-def impute_missing(X: pd.DataFrame, zero_as_missing: bool = True, method: str = "mode") -> pd.DataFrame:
+def impute_missing(X: pd.DataFrame, method: str = "mode") -> pd.DataFrame:
     """
-    缺失值填补（Week1 版提供列众数填补；后续可扩展 KNN/矩阵分解/自编码器等）。
+    缺失值填补（提供列众数填补；后续可扩展 KNN/矩阵分解/自编码器等）。
 
-    :param X: 基因型矩阵 (pd.DataFrame)。
-    :param zero_as_missing: 是否将 0 视作缺失并转为 NaN（默认 True）。
+    :param X: 基因型矩阵 (pd.DataFrame)。（编码规则: 0 = 参考等位基因, 1 = 变异等位基因, 3 = 缺失）
     :param method: 填补方法（当前实现 'mode'；其它方法请在后续版本扩展）。
     :return: 填补后的矩阵 (pd.DataFrame)。
     """
-    Z = X.replace(0, np.nan) if zero_as_missing else X.copy()
+    Z = X.replace(3, np.nan)
     if method == "mode":
         return Z.apply(_fill_col_mode, axis=0)
     raise ValueError("Only 'mode' is implemented in Week1. 请在后续版本扩展 'knn' 等方法。")

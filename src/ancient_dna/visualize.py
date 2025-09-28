@@ -2,7 +2,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 from sklearn.manifold import TSNE, MDS, Isomap
 from umap import UMAP
-import time
+from pathlib import Path
 
 
 def project_embeddings(X: pd.DataFrame, method: str = "umap", n_components: int = 2, **kwargs) -> pd.DataFrame:
@@ -42,7 +42,7 @@ def plot_embedding(
     df: pd.DataFrame,
     labels: pd.Series | None = None,
     title: str = "Projection",
-    save_path: str | None = None,
+    save_path: str | Path | None = None,
     figsize: tuple = (8, 6),
     ax=None
 ) -> None:
@@ -56,8 +56,11 @@ def plot_embedding(
     :param figsize: 图像大小，默认 (8, 6)。
     :param ax: matplotlib Axes 对象。如果提供，则绘制到该子图上。
     """
+    # 判断是否需要自己新建图
+    show_or_save = False
     if ax is None:
         fig, ax = plt.subplots(figsize=figsize)
+        show_or_save = True
 
     if labels is not None:
         ax.scatter(df["Dim1"], df["Dim2"],
@@ -70,43 +73,10 @@ def plot_embedding(
     ax.set_ylabel("Dim2")
     ax.set_title(title)
 
-    if save_path and ax is None:
-        plt.savefig(save_path, dpi=300, bbox_inches="tight")
-        print(f"[OK] 图像已保存到 {save_path}")
-    elif ax is None:
-        plt.show()
-
-def plot_multiple_embeddings(X, meta, methods, label_col=None,
-                             save_path=None, random_state=42, figsize=(16, 12)):
-    """
-    批量运行多种投影方法并画在同一张图上，同时打印每种方法的耗时。
-
-    :param X: 基因型矩阵 (pd.DataFrame)，行=样本，列=SNP。
-    :param meta: 样本注释表 (pd.DataFrame)，包含分类标签等。
-    :param methods: 降维方法列表，例如 ["umap", "tsne", "mds", "isomap"]。
-    :param label_col: meta 中用于着色的列名（如 "haplogroup"）。
-    :param save_path: 若提供，则将整张图保存到文件（PNG/PDF 等）。
-    :param random_state: 随机种子（传递给支持的降维方法）。
-    :param figsize: 整张图的大小，默认 (16, 12)。
-    """
-    fig, axes = plt.subplots(2, 2, figsize=figsize)
-    axes = axes.ravel()
-
-    # 获取标签（如果指定了 label_col）
-    labels = meta[label_col] if (label_col and label_col in meta.columns) else None
-
-    for i, method in enumerate(methods):
-        # 计时
-        start = time.time()
-        proj = project_embeddings(X, method=method, n_components=2, random_state=random_state)
-        elapsed = time.time() - start
-        print(f"{method.upper()} finished in {elapsed:.2f} s")
-
-        # 绘制到子图
-        plot_embedding(proj, labels=labels, title=f"{method.upper()} Projection", ax=axes[i])
-
-    plt.tight_layout()
-    if save_path:
-        plt.savefig(save_path, dpi=300, bbox_inches="tight")
-        print(f"[OK] 投影对比图已保存到 {save_path}")
-    plt.close(fig)   # 防止外部弹窗
+    # 只在函数内部新建图时才处理保存/显示
+    if show_or_save:
+        if save_path:
+            plt.savefig(save_path, dpi=300, bbox_inches="tight")
+            print(f"[OK] 图像已保存到 {save_path}")
+        else:
+            plt.show()

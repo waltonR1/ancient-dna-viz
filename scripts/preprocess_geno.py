@@ -1,3 +1,4 @@
+import time
 from pathlib import Path
 import ancient_dna as adna
 
@@ -7,7 +8,8 @@ def main():
     meta_path = ROOT / "data" / "raw" / "Yhaplfiltered40pct_classes 1.csv"
     geno_proceed = ROOT / "data" / "processed" / "geno.csv"
     meta_proceed = ROOT / "data" / "processed" / "meta.csv"
-    out_path = ROOT / "data" / "results" / "compare_projections.png"
+    results_dir = ROOT / "data" / "results"
+    results_dir.mkdir(exist_ok=True, parents=True)
 
     # === 1. 加载数据 ===
     ids, X, _ = adna.load_geno(geno_path)
@@ -26,16 +28,28 @@ def main():
 
     # === 4. 多方法对比 ===
     methods = ["umap", "tsne", "mds", "isomap"]
+    labels = meta1["haplogroup"] if "haplogroup" in meta1.columns else None
 
-    # 使用库函数生成对比图（内部处理 plt）
-    adna.plot_multiple_embeddings(
-        X=Xi,
-        meta=meta1,
-        methods=methods,
-        label_col="haplogroup",
-        save_path=out_path,
-        random_state=42
-    )
+    for method in methods:
+        start = time.time()
+        proj = adna.project_embeddings(Xi, method=method, n_components=2, random_state=42)
+        elapsed = time.time() - start
+        print(f"{method.upper()} finished in {elapsed:.2f} s")
+
+        # 保存投影结果 CSV
+        proj_path = results_dir / f"proj_{method}.csv"
+        adna.save_csv(proj, proj_path)
+
+        # 绘制并保存单独图像
+        fig_path = results_dir / f"proj_{method}.png"
+        adna.plot_embedding(
+            proj,
+            labels=labels,
+            title=f"{method.upper()} Projection",
+            save_path=fig_path
+        )
+
+    print(f"[OK] 投影结果和图像已保存到 {results_dir}")
 
 
 if __name__ == "__main__":
