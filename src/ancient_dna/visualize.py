@@ -63,9 +63,12 @@ def plot_embedding(
         show_or_save = True
 
     if labels is not None:
-        ax.scatter(df["Dim1"], df["Dim2"],
+        scatter = ax.scatter(df["Dim1"], df["Dim2"],
                    c=pd.Categorical(labels).codes,
                    cmap="tab10", s=30, alpha=0.7)
+
+        handles, _ = scatter.legend_elements(prop="colors", alpha=0.7)
+        ax.legend(handles, pd.Categorical(labels).categories, title="Y Haplogroup")
     else:
         ax.scatter(df["Dim1"], df["Dim2"], s=30, alpha=0.7)
 

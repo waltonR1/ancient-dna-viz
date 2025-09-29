@@ -28,7 +28,7 @@ def main():
 
     # === 4. 多方法对比 ===
     methods = ["umap", "tsne", "mds", "isomap"]
-    labels = meta1["haplogroup"] if "haplogroup" in meta1.columns else None
+    labels = meta1["Y haplogroup"] if "Y haplogroup" in meta1.columns else None
 
     for method in methods:
         start = time.time()
