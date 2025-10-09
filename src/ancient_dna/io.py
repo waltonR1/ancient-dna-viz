@@ -47,19 +47,55 @@ def load_meta(path: str | Path, id_col: str = "Genetic ID", sep: str = ";") -> p
     meta[id_col] = meta[id_col].astype(str).str.strip()
     return meta
 
+def load_csv(path: str | Path, sep: str = ";") -> pd.DataFrame:
+    """
+    通用 CSV 加载函数。
 
-def save_csv(df: pd.DataFrame, path: str | Path, index: bool = False) -> None:
+    :param path: 文件路径。
+    :param sep: 分隔符（默认 ; ，兼容内部标准）。
+    :return: 读取的 DataFrame。
+    """
+    path = Path(path)
+    if not path.exists():
+        raise FileNotFoundError(f"File not found: {path}")
+    df = pd.read_csv(path, sep=sep)
+    print(f"[OK] Loaded CSV: {path.name} ({len(df)} rows, {len(df.columns)} cols)")
+    return df
+
+def save_csv(df: pd.DataFrame, path: str | Path, sep: str = ";", index: bool = False) -> None:
     """
     导出任意 DataFrame 为 CSV 文件。
 
     :param df: 需要导出的 DataFrame（可为SNP矩阵或合并后的大表）。
     :param path: 输出文件路径。
+    :param sep: 分隔符（默认 ","）。
     :param index: 是否导出 DataFrame 的行索引（默认 False）。
     :return: None（直接写入文件）。
     """
     path = Path(path)
-    df.to_csv(path, index=index)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    df.to_csv(path,sep = sep, index = index)
     print(f"[OK] 已导出 → {path.resolve()}")
+
+def load_table(path: str | Path, sep: str = ";") -> pd.DataFrame:
+    """
+    通用表格加载函数（CSV / TSV）。
+
+    :param path: 文件路径。
+    :param sep: 分隔符（默认 ";"）。
+    :return: 加载后的 DataFrame。
+    说明:
+        - 用于读取任意中间结果或统计报告；
+        - 自动检测 UTF-8；
+        - 若无法解析，抛出详细异常。
+    """
+    path = Path(path)
+    try:
+        df = pd.read_csv(path, sep=sep)
+        print(f"[OK] 已加载表格: {path}")
+        return df
+    except Exception as e:
+        raise RuntimeError(f"无法加载表格 {path}: {e}")
 
 def merge_matrix_meta(
     ids: pd.Series,
@@ -296,30 +332,3 @@ def merge_matrix_meta(
 #     X, ids, snp_cols = eigenstrat_to_dataframe(G, snp, ind, missing_code=9, missing_as=missing_as)
 #     anno = read_anno(anno_path) if anno_path is not None else None
 #     return ids, X, snp_cols, anno
-
-
-if __name__ == "__main__":
-    ROOT = Path(__file__).resolve().parents[2]
-
-    try:
-        geno_path = ROOT / "data" / "raw" / "Yhaplfiltered40pct 1.csv"
-        meta_path = ROOT / "data" / "raw" / "Yhaplfiltered40pct_classes 1.csv"
-        ids, X, snp_cols = load_geno(geno_path)
-        meta = load_meta(meta_path)
-        merged_csv = merge_matrix_meta(ids, X, meta)
-        save_csv(merged_csv, ROOT / "data" / "processed" / "merged_csv.csv")
-    except Exception as e:
-        print("[CSV demo skipped]", e)
-
-    # --- EIGENSTRAT 示例 ---
-    # try:
-    #     prefix = ROOT / "data" / "raw" / "v54.1.p1_HO_public"  # 不带后缀
-    #     print(prefix)
-    #     anno_path = str(prefix) + ".anno"
-    #     ids2, X2, snps2, anno2 = load_eigenstrat(prefix, anno_path=anno_path, missing_code=9, missing_as=np.nan)
-    #     # 如果有与 anno 对应的样本ID列名不同，可在 merge_matrix_meta 中改 id_col_meta
-    #     merged_eig = merge_matrix_meta(ids2, X2, anno2 if anno2 is not None else pd.DataFrame({"Genetic ID": ids2}),
-    #                                    id_col_meta="Genetic ID", meta_first=True)
-    #     save_csv(merged_eig, ROOT / "data" / "processed" / "merged_eigenstrat.csv")
-    # except Exception as e:
-    #     print("[EIGENSTRAT demo skipped]", e)
