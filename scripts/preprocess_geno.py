@@ -17,40 +17,40 @@ warnings.filterwarnings("ignore", category=FutureWarning, module="sklearn.manifo
 # === 单一组合执行函数 ===
 def run_impute_reduce_pipeline(X, meta, impute_method, reduce_method, labels, processed_dir, results_dir):
     """
-    执行“单一组合”的数据处理流水线：缺失值填补 → 降维 → 可视化（可选）→ 指标报告 → 运行时记录。
+    运行“缺失值填补 + 降维分析”流程，并保存所有结果文件。
 
-    Args:
-        X (np.ndarray): 预处理后的基因型矩阵（对齐且完成缺失率过滤）。
-        meta (pd.DataFrame): 与 X 对齐后的元数据表（包含可能用作标签的列）。
-        impute_method (str): 缺失值填补方法，例如 'mode'、'mean'、'knn'。
-        reduce_method (str): 降维方法，例如 'umap'、'tsne'、'mds'、'isomap'。
-        labels (Optional[pd.Series]): 可选的分类标签（如 meta['Y haplogroup']）。为 None 时不绘制着色图。
-        processed_dir (Path): 保存填补后数据的目录（会写出 `geno_{impute}.csv`、`meta_{impute}.csv`）。
-        results_dir (Path): 保存降维结果、图像与报告的目录（会写出投影 CSV、PNG、report CSV）。
+    :param X: 原始基因型矩阵 (pd.DataFrame)，行=样本，列=特征，可能含缺失值。
+    :param meta: 样本元数据 (pd.DataFrame)，包含样本的附加信息或标签。
+    :param impute_method: 缺失值填补方法名称，如 "mean"、"mode"、"median"。
+    :param reduce_method: 降维算法名称，如 "pca"、"tsne"、"umap"。
+    :param labels: 分类标签 (pd.Series)，用于绘图着色。若为 None，则不生成图像。
+    :param processed_dir: 处理后数据的输出目录 (Path)。
+    :param results_dir: 降维结果与报告的输出目录 (Path)。
 
-    Returns:
-        Dict[str, Any]: 一条运行记录字典，包括：
-            {
-                "imputation_method": str,
-                "embedding_method": str,
-                "label": str # 标签列名或 "None"
-                "runtime_s": float | None, # 降维耗时（秒）；失败则为 None
-                "status": "success" | "failed",
-                "error": str | 可无  # 失败时包含错误信息
-            }
+    :return: 字典对象，包含运行摘要信息：
+             {
+                 "imputation_method": 填补方法名称,
+                 "embedding_method": 降维方法名称,
+                 "label": 标签列名（若无则为 "None"）,
+                 "runtime_s": 运行耗时（秒）,
+                 "status": "success" 或 "failed",
+                 "error": 错误信息（仅在失败时存在）
+             }
 
-    Side Effects:
-        - 写入以下文件到磁盘：
-          * `processed/geno_{impute}.csv`, `processed/meta_{impute}.csv`
-          * `results/{impute}_proj_{reduce}.csv`
-          * `results/{impute}_proj_{reduce}_{labels.name}.png`（仅当 labels 不为 None）
-          * `results/{impute}_embedding_{reduce}_report.csv`
-        - 控制台打印进度与耗时。
+    步骤说明:
+        1. 缺失值填补：调用 adna.impute_missing() 对基因矩阵进行缺失值处理。
+        2. 保存填补结果：输出至 processed_dir（含 geno_*.csv 与 meta_*.csv）。
+        3. 降维计算：调用 adna.compute_embeddings() 执行 PCA / t-SNE / UMAP。
+        4. 结果保存：
+            - 导出降维坐标 CSV；
+            - 若 labels 存在，则绘制并保存散点图；
+            - 生成降维结果报告（含方差、坐标统计等）。
+        5. 错误捕获：若降维失败，打印警告并返回失败状态字典。
 
-    Notes:
-        - 函数内部捕获降维阶段异常：不会抛出到上层；失败时返回 status='failed' 并包含 error 信息。
-        - 绘图仅在 `labels is not None` 时进行；图片文件名会带上标签列名以便区分。
-        - 为了可重复性，降维时固定 `random_state=42`；如需修改，可在调用侧调整此函数或封装参数。
+    说明:
+        - 每种填补与降维组合都会生成独立结果文件。
+        - 文件命名示例：
+            geno_mean.csv、mean_proj_umap.csv、mean_embedding_pca_report.csv。
     """
     print(f"\n[STEP] Running combination → Impute: {impute_method.upper()} | Reduce: {reduce_method.upper()}")
 
@@ -142,8 +142,10 @@ def main():
     ]
 
     # === 4. 需要测试的组合 ===
-    impute_methods = ["mode", "mean", "knn"]
-    reduce_methods = ["umap", "tsne", "mds", "isomap"]
+    # impute_methods = ["mode", "mean", "knn"]
+    # reduce_methods = ["umap", "tsne", "mds", "isomap"]
+    impute_methods = ["mode"]
+    reduce_methods = ["umap"]
 
     runtime_records = []
 

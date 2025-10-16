@@ -1,7 +1,6 @@
 import pandas as pd
 from ancient_dna import io
 
-
 def test_load_geno_and_save(tmp_dir):
     """测试基因型矩阵加载与保存"""
     df = pd.DataFrame({"Genetic ID": ["A", "B"], "SNP1": [0, 1], "SNP2": [1, 3]})

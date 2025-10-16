@@ -1,156 +1,144 @@
 import pandas as pd
 import matplotlib.pyplot as plt
-from sklearn.manifold import TSNE, MDS, Isomap
-from umap import UMAP
+from matplotlib.cm import get_cmap
+import matplotlib.lines as mlines
 from pathlib import Path
+from matplotlib.colors import ListedColormap
 
-
-# ==== 降维算法实现 ====
-
-def _compute_umap(X: pd.DataFrame, n_components: int = 2, **kwargs) -> pd.DataFrame:
-    """
-    UMAP 降维。
-
-    :param X: 基因型矩阵 (pd.DataFrame)，行=样本，列=SNP。
-    :param n_components: 降维目标维度（默认 2）。
-    :param kwargs: 传递给 UMAP 的额外参数。
-    :return: 降维结果 DataFrame，列名为 ["Dim1", "Dim2", ...]。
-    说明:
-        - 支持 random_state；
-        - 适合保持全局结构与局部簇结构；
-        - 输出结构与样本顺序保持一致。
-    """
-    model = UMAP(n_components=n_components, **kwargs)
-    coords = model.fit_transform(X.fillna(0))
-    return pd.DataFrame(coords, columns=[f"Dim{i+1}" for i in range(n_components)])
-
-
-def _compute_tsne(X: pd.DataFrame, n_components: int = 2, **kwargs) -> pd.DataFrame:
-    """
-    t-SNE 降维。
-
-    :param X: 基因型矩阵 (pd.DataFrame)。
-    :param n_components: 降维目标维度（默认 2）。
-    :param kwargs: 传递给 TSNE 的额外参数。
-    :return: 降维结果 DataFrame。
-    说明:
-        - 支持 random_state；
-        - 仅支持欧氏距离；
-        - 适合局部结构可视化。
-    """
-    model = TSNE(n_components=n_components, **kwargs)
-    coords = model.fit_transform(X.fillna(0))
-    return pd.DataFrame(coords, columns=[f"Dim{i+1}" for i in range(n_components)])
-
-
-def _compute_mds(X: pd.DataFrame, n_components: int = 2, **kwargs) -> pd.DataFrame:
-    """
-    MDS 降维。
-
-    :param X: 基因型矩阵 (pd.DataFrame)。
-    :param n_components: 降维目标维度（默认 2）。
-    :param kwargs: 传递给 MDS 的额外参数。
-    :return: 降维结果 DataFrame。
-    说明:
-        - 不支持 random_state；
-        - 适合线性结构可视化；
-        - 计算复杂度较高。
-    """
-    kwargs.pop("random_state", None)
-    model = MDS(n_components=n_components, **kwargs)
-    coords = model.fit_transform(X.fillna(0))
-    return pd.DataFrame(coords, columns=[f"Dim{i+1}" for i in range(n_components)])
-
-
-def _compute_isomap(X: pd.DataFrame, n_components: int = 2, **kwargs) -> pd.DataFrame:
-    """
-    Isomap 降维。
-
-    :param X: 基因型矩阵 (pd.DataFrame)。
-    :param n_components: 降维目标维度（默认 2）。
-    :param kwargs: 传递给 Isomap 的额外参数。
-    :return: 降维结果 DataFrame。
-    说明:
-        - 不支持 random_state；
-        - 适合流形学习任务；
-        - 保留非线性结构的全局嵌入。
-    """
-    kwargs.pop("random_state", None)
-    model = Isomap(n_components=n_components, **kwargs)
-    coords = model.fit_transform(X.fillna(0))
-    return pd.DataFrame(coords, columns=[f"Dim{i+1}" for i in range(n_components)])
-
-
-# ==== 统一调度接口 ====
-
-def compute_embeddings(X: pd.DataFrame, method: str = "umap", n_components: int = 2, **kwargs) -> pd.DataFrame:
-    """
-    降维统一接口。
-
-    :param X: 基因型矩阵 (pd.DataFrame)，行=样本，列=SNP。
-    :param method: 降维方法（"umap" / "tsne" / "mds" / "isomap"）。
-    :param n_components: 目标维度（2 或 3），默认 2。
-    :param kwargs: 传递给具体算法的额外参数。
-    :return: 投影后的 DataFrame。
-    说明:
-        - 自动根据 method 调用对应算法；
-        - 输出列名为 ["Dim1", "Dim2", ...]；
-        - 若算法不支持 random_state，会自动忽略。
-    """
-    method = method.lower()
-
-    if method == "umap":
-        return _compute_umap(X, n_components=n_components, **kwargs)
-
-    if method == "tsne":
-        return _compute_tsne(X, n_components=n_components, **kwargs)
-
-    if method == "mds":
-        return _compute_mds(X, n_components=n_components, **kwargs)
-
-    if method == "isomap":
-        return _compute_isomap(X, n_components=n_components, **kwargs)
-
-    raise ValueError(f"未知降维方法: {method}")
-
-
-# ==== 可视化 ====
 
 def plot_embedding(
-    df: pd.DataFrame,
-    labels: pd.Series | None = None,
-    title: str = "Projection",
-    save_path: str | Path | None = None,
-    figsize: tuple = (8, 6)
+        df: pd.DataFrame,
+        labels: pd.Series | None = None,
+        title: str = "Projection",
+        save_path: str | Path | None = None,
+        figsize: tuple = (10, 7),
+        legend_pos: str = "right",
+        cmap: str = "tab20",
+        legend_max: int = 20,
+        legend_sort: bool = True,
+        others_color : tuple = (0.7, 0.7, 0.7, 0.5)
 ) -> None:
     """
-    绘制降维结果（支持 2D）。
+    绘制降维结果（支持 2D），点与图例颜色严格一致；
+    超出 legend_max 的类别在图中与 legend 中均以灰色表示。
 
     :param df: 投影后的 DataFrame，至少包含 ["Dim1", "Dim2"]。
-    :param labels: 分类标签 (pd.Series)，如 haplogroup，用于着色。可选。
+    :param labels: 分类标签 (pd.Series)，用于着色。可选。
     :param title: 图标题。
-    :param save_path: 保存路径（如 "plot.png"）。若为 None，则仅显示。
-    :param figsize: 图像大小，默认 (8, 6)。
-    说明:
-        - 每次调用自动创建新图；
-        - 若提供 save_path，则保存为文件；
-        - 若未提供 save_path，则直接显示图像。
+    :param save_path: 保存路径（如 "plot.png"）。若为 None，则直接显示。
+    :param figsize: 图像大小，默认 (10, 7)。
+    :param legend_pos: 图例位置，可选 {"right", "bottom", "top", "inside"}。
+    :param cmap: 颜色映射表（默认 "tab20"）。
+    :param legend_max: 图例显示的最大类别数（超过则合并为灰色 others）。
+    :param legend_sort: 是否按样本数量排序（默认 True）。
+    :param others_color:超出legend限制的样本的颜色
+
+    说明：
+        - 图中点与 legend 颜色保持一致；
+        - 超出 legend_max 的类别在图中以灰色显示；
+        - 使用固定离散色表 (tab20)；
+        - 图例默认在右侧；
+        - 支持保存或直接显示。
     """
     fig, ax = plt.subplots(figsize=figsize)
 
     if labels is not None:
-        scatter = ax.scatter(df["Dim1"], df["Dim2"],
-                             c=pd.Categorical(labels).codes,
-                             cmap="tab10", s=30, alpha=0.7)
-        handles, _ = scatter.legend_elements(prop="colors", alpha=0.7)
-        ax.legend(handles, pd.Categorical(labels).categories, title="Y Haplogroup")
-    else:
-        ax.scatter(df["Dim1"], df["Dim2"], s=30, alpha=0.7)
+        # ====== Step 1. 分类与排序 ======
+        categories = pd.Categorical(labels)
+        n_classes = len(categories.categories)
 
+        if legend_sort:
+            counts = pd.value_counts(categories)
+            ordered_categories = counts.index.tolist()  # 按样本数降序
+            categories = pd.Categorical(labels, categories=ordered_categories, ordered=True)
+        else:
+            ordered_categories = list(categories.categories)
+
+        # ====== Step 2. 使用 tab20 颜色 ======
+        base_cmap = get_cmap(cmap)
+        tab20_colors = [base_cmap(i / 19) for i in range(20)]  # tab20 自带 20 种颜色
+
+        # ====== Step 3. 区分主要类别与 others ======
+        if n_classes > legend_max:
+            main_colors = tab20_colors[:legend_max]
+            mask_main = categories.codes < legend_max
+            # mask_others = ~mask_main
+
+            # 主类散点
+            ax.scatter(
+                df.loc[mask_main, "Dim1"],
+                df.loc[mask_main, "Dim2"],
+                c=categories.codes[mask_main],
+                cmap=ListedColormap(main_colors),
+                s=20, alpha=0.5
+            )
+
+            # 其他类灰色(此处注释掉使得不绘制灰色的点)
+            # ax.scatter(
+            #     df.loc[mask_others, "Dim1"],
+            #     df.loc[mask_others, "Dim2"],
+            #     color=others_color,
+            #     s=20, alpha=0.3
+            # )
+
+            display_classes = list(categories.categories[:legend_max]) + ["... (others)"]
+            display_colors = main_colors + [others_color]
+
+        else:
+            main_colors = tab20_colors[:n_classes]
+            ax.scatter(
+                df["Dim1"], df["Dim2"],
+                c=categories.codes,
+                cmap=ListedColormap(main_colors),
+                s=20, alpha=0.5
+            )
+            display_classes = categories.categories
+            display_colors = main_colors
+
+        # ====== Step 4. Legend 绘制 ======
+        legend_title = labels.name if labels.name else "Category"
+        handles = [
+            mlines.Line2D([], [], color=display_colors[i], marker='o',
+                          linestyle='None', markersize=6)
+            for i in range(len(display_classes))
+        ]
+
+        # 图例位置布局
+        if legend_pos == "right":
+            loc, bbox, rect = "center left", (1.02, 0.5), [0, 0, 0.85, 1]
+        elif legend_pos == "bottom":
+            loc, bbox, rect = "upper center", (0.5, -0.15), [0, 0.1, 1, 1]
+        elif legend_pos == "top":
+            loc, bbox, rect = "lower center", (0.5, 1.15), [0, 0, 1, 0.9]
+        elif legend_pos == "inside":
+            loc, bbox, rect = "upper right", None, [0, 0, 1, 1]
+        else:
+            raise ValueError(f"Invalid legend_pos: {legend_pos}")
+
+        ax.legend(
+            handles,
+            display_classes,
+            title=legend_title,
+            loc=loc,
+            bbox_to_anchor=bbox,
+            frameon=False,
+            fontsize=9,
+            title_fontsize=10
+        )
+
+    else:
+        # ====== 无标签情况 ======
+        ax.scatter(df["Dim1"], df["Dim2"], s=30, alpha=0.7, color="gray")
+        rect = [0, 0, 1, 1]
+
+    # ====== Step 5. 坐标轴与标题 ======
     ax.set_xlabel("Dim1")
     ax.set_ylabel("Dim2")
     ax.set_title(title)
 
+    plt.tight_layout(rect=[0, 0, 0.85, 1])
+
+    # ====== Step 6. 保存或显示 ======
     if save_path:
         plt.savefig(save_path, dpi=300, bbox_inches="tight")
         print(f"[OK] 图像已保存到 {save_path}")
