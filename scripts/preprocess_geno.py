@@ -129,11 +129,16 @@ def main():
     # === 2. 对齐与预处理 ===
     print("[STEP] Aligning and computing missingness ...")
     X1, meta1 = adna.align_by_id(ids, X, meta)
+    missing_path = results_dir / "Missing.png"
+    adna.plot_missing_values(X1,save_path=missing_path)
+    print("[OK] Displayed missing value pattern for inspection.")
     sm, cm = adna.compute_missing_rates(X1)
     Xf = adna.filter_by_missing(X1, sm, cm)
     missing_report = adna.build_missing_report(sm, cm)
     adna.save_report(missing_report, results_dir / "missing_report.csv")
     print(f"[OK] Missingness report saved.")
+    adna.plot_missing_values(Xf)
+
 
     # === 3. 预留标签列组合（可自由添加/删除） ===
     label_columns = [

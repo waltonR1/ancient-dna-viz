@@ -4,7 +4,7 @@ from matplotlib.cm import get_cmap
 import matplotlib.lines as mlines
 from pathlib import Path
 from matplotlib.colors import ListedColormap
-
+import numpy as np
 
 def plot_embedding(
         df: pd.DataFrame,
@@ -48,7 +48,7 @@ def plot_embedding(
         n_classes = len(categories.categories)
 
         if legend_sort:
-            counts = pd.value_counts(categories)
+            counts = pd.Series(categories).value_counts()
             ordered_categories = counts.index.tolist()  # 按样本数降序
             categories = pd.Categorical(labels, categories=ordered_categories, ordered=True)
         else:
@@ -105,13 +105,13 @@ def plot_embedding(
 
         # 图例位置布局
         if legend_pos == "right":
-            loc, bbox, rect = "center left", (1.02, 0.5), [0, 0, 0.85, 1]
+            loc, bbox, rect = "center left", (1.02, 0.5), (0, 0, 0.85, 1)
         elif legend_pos == "bottom":
-            loc, bbox, rect = "upper center", (0.5, -0.15), [0, 0.1, 1, 1]
+            loc, bbox, rect = "upper center", (0.5, -0.15), (0, 0.1, 1, 1)
         elif legend_pos == "top":
-            loc, bbox, rect = "lower center", (0.5, 1.15), [0, 0, 1, 0.9]
+            loc, bbox, rect = "lower center", (0.5, 1.15), (0, 0, 1, 0.9)
         elif legend_pos == "inside":
-            loc, bbox, rect = "upper right", None, [0, 0, 1, 1]
+            loc, bbox, rect = "upper right", None, (0, 0, 1, 1)
         else:
             raise ValueError(f"Invalid legend_pos: {legend_pos}")
 
@@ -136,7 +136,7 @@ def plot_embedding(
     ax.set_ylabel("Dim2")
     ax.set_title(title)
 
-    plt.tight_layout(rect=[0, 0, 0.85, 1])
+    plt.tight_layout(rect = rect)
 
     # ====== Step 6. 保存或显示 ======
     if save_path:
@@ -146,3 +146,61 @@ def plot_embedding(
         plt.show()
 
     plt.close(fig)
+
+
+def plot_missing_values(
+    df: pd.DataFrame,
+    save_path: str | Path | None = None,
+    missing_value: int | float = 3,
+    figsize: tuple = (20, 10),
+    cmap_present: str = "#d95f02",
+    cmap_missing: str = "#ffffff",
+    show_ratio: bool = True,
+) -> None:
+    """
+    绘制缺失数据可视化图（白色 = 缺失）。
+
+    :param df: 输入 DataFrame。
+    :param save_path: 保存路径（如 "plot.png"）。若为 None，则直接显示。
+    :param missing_value: 缺失值标记（默认 3）。
+    :param figsize: 图像大小 (宽, 高)，默认 (20, 10)。
+    :param cmap_present: 非缺失值颜色，默认橙色 (#d95f02)。
+    :param cmap_missing: 缺失值颜色，默认白色 (#ffffff)。
+    :param show_ratio: 是否同时显示缺失比例条形图，默认 True。
+    """
+    # Step 1. 创建缺失掩码
+    mask = (df == missing_value).to_numpy()
+
+    # Step 2. 画布布局
+    if show_ratio:
+        fig, axes = plt.subplots(2, 1, figsize=figsize, gridspec_kw={"height_ratios": [4, 1]})
+    else:
+        fig, ax = plt.subplots(figsize=figsize)
+        axes = [ax]
+
+    # Step 3. 绘制缺失矩阵（白 = 缺失）
+    ax = axes[0]
+    ax.imshow(mask, aspect='auto', cmap=ListedColormap([cmap_present, cmap_missing]), interpolation='none')
+    ax.set_title(f"Missing Data Pattern")
+    ax.set_xlabel("Columns")
+    ax.set_ylabel("Samples")
+
+    # Step 4. 绘制缺失比例（可选）
+    if show_ratio:
+        ax_ratio = axes[1]
+        missing_ratio = (df == missing_value).mean() * 100
+        ax_ratio.bar(np.arange(len(df.columns)), missing_ratio, color="#ff7043")
+        ax_ratio.set_ylabel("Missing (%)")
+        ax_ratio.set_xticks([])
+        ax_ratio.set_ylim(0, 100)
+        ax_ratio.grid(axis="y", linestyle="--", alpha=0.3)
+        ax_ratio.set_title("Missing Ratio per Column")
+
+    # Step 5. 调整布局
+    plt.tight_layout()
+
+    if save_path:
+        plt.savefig(save_path, dpi=300, bbox_inches="tight")
+        print(f"[OK] 图像已保存到 {save_path}")
+    else:
+        plt.show()
