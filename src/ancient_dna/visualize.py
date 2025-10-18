@@ -204,3 +204,5 @@ def plot_missing_values(
         print(f"[OK] 图像已保存到 {save_path}")
     else:
         plt.show()
+
+    plt.close(fig)
