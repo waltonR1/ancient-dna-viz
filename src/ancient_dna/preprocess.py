@@ -44,13 +44,7 @@ def compute_missing_rates(X: pd.DataFrame) -> Tuple[pd.Series, pd.Series]:
     return sample_missing, snp_missing
 
 
-def filter_by_missing(
-    X: pd.DataFrame,
-    sample_missing: pd.Series,
-    snp_missing: pd.Series,
-    max_sample_missing: float = 0.8,
-    max_snp_missing: float = 0.8
-) -> pd.DataFrame:
+def filter_by_missing(X: pd.DataFrame, sample_missing: pd.Series, snp_missing: pd.Series, max_sample_missing: float = 0.8, max_snp_missing: float = 0.8) -> pd.DataFrame:
     """
     按缺失率阈值过滤样本与 SNP（默认阈值较宽松，可在后续调整）。
 

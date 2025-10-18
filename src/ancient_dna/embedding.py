@@ -19,6 +19,7 @@ def _compute_umap(X: pd.DataFrame, n_components: int = 2, **kwargs) -> pd.DataFr
     coords = model.fit_transform(X.fillna(0))
     return pd.DataFrame(coords, columns=[f"Dim{i+1}" for i in range(n_components)])
 
+
 def _compute_tsne(X: pd.DataFrame, n_components: int = 2, **kwargs) -> pd.DataFrame:
     """
     t-SNE 降维。
@@ -35,6 +36,7 @@ def _compute_tsne(X: pd.DataFrame, n_components: int = 2, **kwargs) -> pd.DataFr
     model = TSNE(n_components=n_components, **kwargs)
     coords = model.fit_transform(X.fillna(0))
     return pd.DataFrame(coords, columns=[f"Dim{i+1}" for i in range(n_components)])
+
 
 def _compute_mds(X: pd.DataFrame, n_components: int = 2, **kwargs) -> pd.DataFrame:
     """
@@ -54,6 +56,7 @@ def _compute_mds(X: pd.DataFrame, n_components: int = 2, **kwargs) -> pd.DataFra
     coords = model.fit_transform(X.fillna(0))
     return pd.DataFrame(coords, columns=[f"Dim{i+1}" for i in range(n_components)])
 
+
 def _compute_isomap(X: pd.DataFrame, n_components: int = 2, **kwargs) -> pd.DataFrame:
     """
     Isomap 降维。
@@ -71,6 +74,7 @@ def _compute_isomap(X: pd.DataFrame, n_components: int = 2, **kwargs) -> pd.Data
     model = Isomap(n_components=n_components, **kwargs)
     coords = model.fit_transform(X.fillna(0))
     return pd.DataFrame(coords, columns=[f"Dim{i+1}" for i in range(n_components)])
+
 
 def compute_embeddings(X: pd.DataFrame, method: str = "umap", n_components: int = 2, **kwargs) -> pd.DataFrame:
     """

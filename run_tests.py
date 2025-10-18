@@ -4,5 +4,17 @@ import pytest
 
 if __name__ == "__main__":
     root = Path(__file__).resolve().parent
-    sys.path.insert(0, str(root / "src"))
-    raise SystemExit(pytest.main(["-v", "src/ancient_dna/tests"]))
+    src_path = root / "src"
+    sys.path.insert(0, str(src_path))
+
+    print(f"[INFO] Project root: {root}")
+    print(f"[INFO] Added to sys.path: {src_path}")
+    print("[INFO] Running pytest...\n")
+
+    errno = pytest.main(["-v"])
+    raise SystemExit(errno)
+
+
+#查看HTML报告
+#start htmlcov\index.html  (Windows)
+#open htmlcov/index.html (macOS/Linux)

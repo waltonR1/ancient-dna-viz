@@ -151,7 +151,7 @@ def plot_embedding(
 def plot_missing_values(
     df: pd.DataFrame,
     save_path: str | Path | None = None,
-    missing_value: int | float = 3,
+    missing_value: int = 3,
     figsize: tuple = (20, 10),
     cmap_present: str = "#d95f02",
     cmap_missing: str = "#ffffff",
@@ -160,7 +160,7 @@ def plot_missing_values(
     """
     绘制缺失数据可视化图（白色 = 缺失）。
 
-    :param df: 输入 DataFrame。
+    :param df: 基因样本数据。
     :param save_path: 保存路径（如 "plot.png"）。若为 None，则直接显示。
     :param missing_value: 缺失值标记（默认 3）。
     :param figsize: 图像大小 (宽, 高)，默认 (20, 10)。

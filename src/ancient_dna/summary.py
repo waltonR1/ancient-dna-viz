@@ -1,6 +1,8 @@
 import pandas as pd
 from pathlib import Path
 
+from ancient_dna import save_csv
+
 
 def build_missing_report(sample_missing: pd.Series, snp_missing: pd.Series) -> pd.DataFrame:
     """
@@ -11,8 +13,7 @@ def build_missing_report(sample_missing: pd.Series, snp_missing: pd.Series) -> p
     :return: 单行 DataFrame，包含描述性统计结果。
     说明:
         - 汇总样本级与位点级的缺失率指标；
-        - 包含均值、中位数、最大值等；
-        - 可与 save_report() 搭配使用导出 CSV。
+        - 包含均值、中位数、最大值；
     """
     sm = sample_missing.describe()
     cm = snp_missing.describe()
@@ -64,27 +65,9 @@ def save_report(df: pd.DataFrame, path: str | Path) -> None:
         - 使用 UTF-8 编码；
         - 输出包含列名。
     """
-    path = Path(path)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    df.to_csv(path, index=False, encoding="utf-8")
+
+    save_csv(df, path, verbose=False)
     print(f"[OK] 报告已保存: {path}")
-
-
-def combine_reports(reports: dict[str, pd.DataFrame]) -> pd.DataFrame:
-    """
-    合并多份报告（例如不同阶段或不同指标）。
-
-    :param reports: 报告字典，键为报告名称，值为 DataFrame。
-    :return: 合并后的报告总表。
-    说明:
-        - 自动为每份报告添加前缀；
-        - 用于生成多模块汇总表。
-    """
-    combined = []
-    for name, df in reports.items():
-        renamed = df.add_prefix(f"{name}_")
-        combined.append(renamed)
-    return pd.concat(combined, axis=1)
 
 
 def save_runtime_report(records: list[dict], path: str | Path) -> None:

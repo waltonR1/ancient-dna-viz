@@ -22,7 +22,7 @@ def run_impute_reduce_pipeline(X, meta, impute_method, reduce_method, labels, pr
     :param X: 原始基因型矩阵 (pd.DataFrame)，行=样本，列=特征，可能含缺失值。
     :param meta: 样本元数据 (pd.DataFrame)，包含样本的附加信息或标签。
     :param impute_method: 缺失值填补方法名称，如 "mean"、"mode"、"median"。
-    :param reduce_method: 降维算法名称，如 "pca"、"tsne"、"umap"。
+    :param reduce_method: 降维算法名称，如 "mds"、"tsne"、"umap"、"isomap"。
     :param labels: 分类标签 (pd.Series)，用于绘图着色。若为 None，则不生成图像。
     :param processed_dir: 处理后数据的输出目录 (Path)。
     :param results_dir: 降维结果与报告的输出目录 (Path)。
@@ -40,7 +40,7 @@ def run_impute_reduce_pipeline(X, meta, impute_method, reduce_method, labels, pr
     步骤说明:
         1. 缺失值填补：调用 adna.impute_missing() 对基因矩阵进行缺失值处理。
         2. 保存填补结果：输出至 processed_dir（含 geno_*.csv 与 meta_*.csv）。
-        3. 降维计算：调用 adna.compute_embeddings() 执行 PCA / t-SNE / UMAP。
+        3. 降维计算：调用 adna.compute_embeddings() 执行 mds / t-SNE / UMAP / isomap。
         4. 结果保存：
             - 导出降维坐标 CSV；
             - 若 labels 存在，则绘制并保存散点图；
@@ -50,7 +50,7 @@ def run_impute_reduce_pipeline(X, meta, impute_method, reduce_method, labels, pr
     说明:
         - 每种填补与降维组合都会生成独立结果文件。
         - 文件命名示例：
-            geno_mean.csv、mean_proj_umap.csv、mean_embedding_pca_report.csv。
+            geno_mean.csv、meta_mean.csv、mean_embeddings_umap.csv、mean_embedding_tsne_report.csv。
     """
     print(f"\n[STEP] Running combination → Impute: {impute_method.upper()} | Reduce: {reduce_method.upper()}")
 
@@ -65,26 +65,26 @@ def run_impute_reduce_pipeline(X, meta, impute_method, reduce_method, labels, pr
     # 2. 降维
     start = time.time()
     try:
-        proj = adna.compute_embeddings(Xi, method=reduce_method, n_components=2, random_state=42)
+        embeddings = adna.compute_embeddings(Xi, method=reduce_method, n_components=2, random_state=42)
         elapsed = round(time.time() - start, 3)
         print(f"[OK] {reduce_method.upper()} completed in {elapsed:.2f}s")
 
         # 保存降维结果
-        proj_path = results_dir / f"{impute_method}_proj_{reduce_method}.csv"
-        adna.save_csv(proj, proj_path)
+        embeddings_path = results_dir / f"{impute_method}_embeddings_{reduce_method}.csv"
+        adna.save_csv(embeddings, embeddings_path)
 
         # 绘图（若 labels 存在）
         if labels is not None:
-            fig_path = results_dir / f"{impute_method}_proj_{reduce_method}_{labels.name}.png"
+            fig_path = results_dir / f"{impute_method}_embeddings_{reduce_method}_{labels.name}.png"
             adna.plot_embedding(
-                proj,
+                embeddings,
                 labels=labels,
                 title=f"{reduce_method.upper()} ({impute_method}) Projection by {labels.name}",
                 save_path=fig_path
             )
 
         # 生成报告
-        emb_report = adna.build_embedding_report(proj)
+        emb_report = adna.build_embedding_report(embeddings)
         report_path = results_dir / f"{impute_method}_embedding_{reduce_method}_report.csv"
         adna.save_report(emb_report, report_path)
         print(f"[OK] Embedding report saved: {report_path.name}")
@@ -137,20 +137,26 @@ def main():
     missing_report = adna.build_missing_report(sm, cm)
     adna.save_report(missing_report, results_dir / "missing_report.csv")
     print(f"[OK] Missingness report saved.")
-    adna.plot_missing_values(Xf)
+    after_filtering_missing_path = results_dir / "Missing_after_filtering.png"
+    adna.plot_missing_values(Xf,save_path=after_filtering_missing_path)
+    print("[OK] Displayed missing value pattern after filtering for inspection.")
 
 
     # === 3. 预留标签列组合（可自由添加/删除） ===
+    # label_columns = [
+    #     "Y haplogroup",
+    #     "World Zone",
+    #     "Political Entity"
+    # ]
     label_columns = [
-        "Y haplogroup",
         "World Zone"
     ]
 
     # === 4. 需要测试的组合 ===
     # impute_methods = ["mode", "mean", "knn"]
     # reduce_methods = ["umap", "tsne", "mds", "isomap"]
-    impute_methods = ["mode"]
-    reduce_methods = ["umap"]
+    impute_methods = ["knn"]
+    reduce_methods = ["tsne"]
 
     runtime_records = []
 

@@ -1,5 +1,3 @@
-import pytest
-import pandas as pd
 from ancient_dna import embedding
 
 def test_compute_embeddings_tsne(sample_data):
@@ -13,10 +11,12 @@ def test_compute_embeddings_tsne(sample_data):
     )
     assert emb.shape[1] == 2
 
+
 def test_compute_embeddings_mds(sample_data):
     """测试 MDS 降维"""
     emb = embedding.compute_embeddings(sample_data, method="mds", n_components=2)
     assert emb.shape[1] == 2
+
 
 def test_compute_embeddings_isomap(sample_data):
     """测试 Isomap 降维"""
@@ -28,6 +28,7 @@ def test_compute_embeddings_isomap(sample_data):
     )
     assert emb.shape[1] == 2
     assert list(emb.columns) == ["Dim1", "Dim2"]
+
 
 def test_compute_embeddings(sample_data):
     """测试降维计算"""
