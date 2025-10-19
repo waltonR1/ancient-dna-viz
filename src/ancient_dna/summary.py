@@ -29,6 +29,8 @@ def build_missing_report(sample_missing: pd.Series, snp_missing: pd.Series) -> p
         "snp_missing_max": [cm["max"]],
     })
 
+    print("[INFO] Build missing report:")
+
     return report
 
 
@@ -43,6 +45,7 @@ def build_embedding_report(embedding: pd.DataFrame) -> pd.DataFrame:
         - 可用于评估降维结果的数值范围与分布；
         - 若某维方差过小，可能存在坍缩问题。
     """
+    print("[INFO] Build embedding report:")
     stats = embedding.describe().T[["mean", "std", "min", "max"]]
     stats = stats.rename(columns={
         "mean": "Mean",
@@ -51,6 +54,7 @@ def build_embedding_report(embedding: pd.DataFrame) -> pd.DataFrame:
         "max": "Max"
     })
     stats.index.name = "Dimension"
+    print("[OK] Embedding report built.")
     return stats.reset_index()
 
 
@@ -67,7 +71,7 @@ def save_report(df: pd.DataFrame, path: str | Path) -> None:
     """
 
     save_csv(df, path, verbose=False)
-    print(f"[OK] 报告已保存: {path}")
+    print(f"[OK] The report is saved: {path}")
 
 
 def save_runtime_report(records: list[dict], path: str | Path) -> None:
@@ -79,14 +83,12 @@ def save_runtime_report(records: list[dict], path: str | Path) -> None:
     :param path: 输出文件路径。
     :return: None
     """
+    print("[INFO] Collect the runtime summary:")
     if not records:
         print("[WARN] No runtime records to save.")
         return
 
-    path = Path(path)
-    path.parent.mkdir(parents=True, exist_ok=True)
-
     df = pd.DataFrame(records)
-    df.to_csv(path, sep=",", index=False, encoding="utf-8")
+    save_csv(df, path, verbose=False)
 
     print(f"[OK] Runtime summary report saved: {path.resolve()} ({len(df)} rows)")

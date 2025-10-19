@@ -90,18 +90,19 @@ def compute_embeddings(X: pd.DataFrame, method: str = "umap", n_components: int 
         - 输出列名为 ["Dim1", "Dim2", ...]；
         - 若算法不支持 random_state，会自动忽略。
     """
+    print(f"[INFO] Compute embeddings with method: {method}")
     method = method.lower()
 
     if method == "umap":
-        return _compute_umap(X, n_components=n_components, **kwargs)
+        embedding = _compute_umap(X, n_components=n_components, **kwargs)
+    elif method == "tsne":
+        embedding = _compute_tsne(X, n_components=n_components, **kwargs)
+    elif method == "mds":
+        embedding = _compute_mds(X, n_components=n_components, **kwargs)
+    elif method == "isomap":
+        embedding = _compute_isomap(X, n_components=n_components, **kwargs)
+    else:
+        raise ValueError(f"未知降维方法: {method}")
 
-    if method == "tsne":
-        return _compute_tsne(X, n_components=n_components, **kwargs)
-
-    if method == "mds":
-        return _compute_mds(X, n_components=n_components, **kwargs)
-
-    if method == "isomap":
-        return _compute_isomap(X, n_components=n_components, **kwargs)
-
-    raise ValueError(f"未知降维方法: {method}")
+    print(f"[OK] Embeddings computed with method: {method}")
+    return embedding

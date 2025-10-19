@@ -79,4 +79,4 @@ def save_csv(df: pd.DataFrame, path: str | Path, sep: str = ";", index: bool = F
     df.to_csv(path,sep = sep, index = index)
 
     if verbose:
-        print(f"[OK] Saved CSV: {path.resolve()} ({len(df)} rows)")
+        print(f"[OK] Saved Dataset: {path.resolve()} ({len(df)} rows)")

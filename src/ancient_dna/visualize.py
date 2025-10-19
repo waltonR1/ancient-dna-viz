@@ -141,9 +141,10 @@ def plot_embedding(
     # ====== Step 6. 保存或显示 ======
     if save_path:
         plt.savefig(save_path, dpi=300, bbox_inches="tight")
-        print(f"[OK] 图像已保存到 {save_path}")
+        print(f"[OK] 二维图像已保存到 {save_path}")
     else:
         plt.show()
+        print("[OK} 二维图像已展示")
 
     plt.close(fig)
 
@@ -168,6 +169,7 @@ def plot_missing_values(
     :param cmap_missing: 缺失值颜色，默认白色 (#ffffff)。
     :param show_ratio: 是否同时显示缺失比例条形图，默认 True。
     """
+    print("[INFO] Plotting missing value pattern...")
     # Step 1. 创建缺失掩码
     mask = (df == missing_value).to_numpy()
 
@@ -201,8 +203,9 @@ def plot_missing_values(
 
     if save_path:
         plt.savefig(save_path, dpi=300, bbox_inches="tight")
-        print(f"[OK] 图像已保存到 {save_path}")
+        print(f"[OK] Missing value plot已保存到 {save_path}")
     else:
+        print("[OK] Displayed missing value pattern for inspection.")
         plt.show()
 
     plt.close(fig)

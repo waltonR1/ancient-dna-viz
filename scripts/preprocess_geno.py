@@ -52,7 +52,7 @@ def run_impute_reduce_pipeline(X, meta, impute_method, reduce_method, labels, pr
         - 文件命名示例：
             geno_mean.csv、meta_mean.csv、mean_embeddings_umap.csv、mean_embedding_tsne_report.csv。
     """
-    print(f"\n[STEP] Running combination → Impute: {impute_method.upper()} | Reduce: {reduce_method.upper()}")
+    print(f"\n[INFO] Running combination → Impute: {impute_method.upper()} | Reduce: {reduce_method.upper()}")
 
     # 1. 缺失值填补
     Xi = adna.impute_missing(X, method=impute_method)
@@ -87,7 +87,6 @@ def run_impute_reduce_pipeline(X, meta, impute_method, reduce_method, labels, pr
         emb_report = adna.build_embedding_report(embeddings)
         report_path = results_dir / f"{impute_method}_embedding_{reduce_method}_report.csv"
         adna.save_report(emb_report, report_path)
-        print(f"[OK] Embedding report saved: {report_path.name}")
 
         return {
             "imputation_method": impute_method,
@@ -127,19 +126,17 @@ def main():
     meta = adna.load_meta(meta_path)
 
     # === 2. 对齐与预处理 ===
-    print("[STEP] Aligning and computing missingness ...")
     X1, meta1 = adna.align_by_id(ids, X, meta)
     missing_path = results_dir / "Missing.png"
     adna.plot_missing_values(X1,save_path=missing_path)
-    print("[OK] Displayed missing value pattern for inspection.")
+
     sm, cm = adna.compute_missing_rates(X1)
     Xf = adna.filter_by_missing(X1, sm, cm)
     missing_report = adna.build_missing_report(sm, cm)
     adna.save_report(missing_report, results_dir / "missing_report.csv")
-    print(f"[OK] Missingness report saved.")
+
     after_filtering_missing_path = results_dir / "Missing_after_filtering.png"
     adna.plot_missing_values(Xf,save_path=after_filtering_missing_path)
-    print("[OK] Displayed missing value pattern after filtering for inspection.")
 
 
     # === 3. 预留标签列组合（可自由添加/删除） ===
@@ -153,9 +150,9 @@ def main():
     ]
 
     # === 4. 需要测试的组合 ===
-    # impute_methods = ["mode", "mean", "knn"]
+    # impute_methods = ["mode", "mean", "knn","knn_hamming"]
     # reduce_methods = ["umap", "tsne", "mds", "isomap"]
-    impute_methods = ["knn"]
+    impute_methods = ["knn","knn_hamming"]
     reduce_methods = ["tsne"]
 
     runtime_records = []
@@ -179,8 +176,8 @@ def main():
     # === 6. 保存运行时间汇总 ===
     if runtime_records:
         runtime_path = results_dir / "runtime_summary.csv"
+        print("\n")
         adna.save_runtime_report(runtime_records, runtime_path)
-        print(f"[OK] Runtime summary saved: {runtime_path.name}")
 
     print("\n[ALL DONE] 所有组合已执行完成！")
     print(f"[PATH] 查看结果目录: {results_dir}")
