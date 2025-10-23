@@ -818,11 +818,11 @@ X_filtered = adna.filter_by_missing(X1, sm, cm)
 
 **参数：**
 
-|      参数       |       类型       |   是否默认   |                     说明                     |
-|:-------------:|:--------------:|:--------:|:------------------------------------------:|
-|      `X`      | `pd.DataFrame` |          |                   基因型矩阵                    |
-|   `method`    |     `str`      | `"mode"` | 填补方法（`mode`, `mean`, `knn`, `knn_hamming`） |
-| `n_neighbors` |     `int`      |   `5`    |                 KNN 插补的近邻数                 |
+|      参数       |       类型       |   是否默认   |                                                          说明                                                           |
+|:-------------:|:--------------:|:--------:|:---------------------------------------------------------------------------------------------------------------------:|
+|      `X`      | `pd.DataFrame` |          |                                                         基因型矩阵                                                         |
+|   `method`    |     `str`      | `"mode"` | 填补方法（`mode`, `mean`, `knn`, `knn_hamming`,`knn_hamming_abs`,`knn_hamming_adaptive`,`knn_hybrid_autoalpha`,`knn_auto`） |
+| `n_neighbors` |     `int`      |   `5`    |                                                      KNN 插补的近邻数                                                       |
 
 **返回：**
 `(filled: pd.DataFrame)` 

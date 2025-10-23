@@ -152,8 +152,8 @@ def main():
     # === 4. 需要测试的组合 ===
     # impute_methods = ["mode", "mean", "knn","knn_hamming"]
     # reduce_methods = ["umap", "tsne", "mds", "isomap"]
-    # impute_methods = ["knn","knn_hamming_abs","knn_hamming_weighted","knn_hamming_adaptive","knn_hybrid_hamming_euclidean","knn_hybrid_autoalpha"]
-    impute_methods = ["knn_hybrid_autoalpha"]
+    impute_methods = ["knn","knn_hamming_abs","knn_hamming_adaptive","knn_hybrid_autoalpha"]
+    # impute_methods = ["knn_hybrid_autoalpha"]
     reduce_methods = ["tsne"]
 
     runtime_records = []
