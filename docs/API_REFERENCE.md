@@ -13,6 +13,7 @@
 4. preprocess.py – 数据预处理与缺失值填补
 5. report.py – 报告生成与汇总工具
 6. visualize.py – 可视化绘图工具
+7. clustering.py - 层次聚类模块（尚未编写）
 
 ---
 

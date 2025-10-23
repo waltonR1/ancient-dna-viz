@@ -15,7 +15,7 @@ warnings.filterwarnings("ignore", category=FutureWarning, module="sklearn.manifo
 
 
 # === 单一组合执行函数 ===
-def run_impute_reduce_pipeline(X, meta, impute_method, reduce_method, labels, processed_dir, results_dir):
+def run_impute_reduce_pipeline(X, meta, impute_method, reduce_method, labels, processed_dir, results_dir, auto_cluster: bool = True):
     """
     运行“缺失值填补 + 降维分析”流程，并保存所有结果文件。
 
@@ -26,6 +26,7 @@ def run_impute_reduce_pipeline(X, meta, impute_method, reduce_method, labels, pr
     :param labels: 分类标签 (pd.Series)，用于绘图着色。若为 None，则不生成图像。
     :param processed_dir: 处理后数据的输出目录 (Path)。
     :param results_dir: 降维结果与报告的输出目录 (Path)。
+    :param auto_cluster: 是否自动寻找簇数
 
     :return: 字典对象，包含运行摘要信息：
              {
@@ -87,6 +88,54 @@ def run_impute_reduce_pipeline(X, meta, impute_method, reduce_method, labels, pr
         emb_report = adna.build_embedding_report(embeddings)
         report_path = results_dir / f"{impute_method}_embedding_{reduce_method}_report.csv"
         adna.save_report(emb_report, report_path)
+
+
+
+        # 层次聚类分析
+        print("\n[INFO] Running hierarchical clustering analysis...")
+
+        if auto_cluster:
+            best_k = 6
+
+            # best_k = adna.find_optimal_clusters(
+            #     Xi, linkage_method="ward", metric="euclidean", cluster_range=range(2, 10), plot=True
+            # )
+            print(f"[INFO] Using optimal cluster number: {best_k}")
+        else:
+            best_k = 6
+
+        # 高维聚类
+        meta_hd = adna.cluster_highdimensional(Xi, meta.copy(), n_clusters=best_k)
+        adna.save_csv(meta_hd, results_dir / f"{impute_method}_highdim_clusters.csv")
+
+        # 降维结果聚类
+        meta_2d = adna.cluster_on_embedding(embeddings, meta.copy(), n_clusters=best_k)
+        adna.save_csv(meta_2d, results_dir / f"{impute_method}_{reduce_method}_2D_clusters.csv")
+
+        # 聚类可视化
+        adna.plot_cluster_on_embedding(
+            embeddings,
+            labels=meta_2d["cluster_2D"],
+            meta=meta_2d,
+            label_col="World Zone",
+            title=f"{reduce_method.upper()} + Hierarchical Clustering ({impute_method}) [k={best_k}]",
+            figsize=(8, 6)
+        )
+
+        # 聚类 vs 标签一致性分析
+        enable_cluster_label_analysis = True
+        if enable_cluster_label_analysis:
+            try:
+                summary_df = adna.compare_clusters_vs_labels(
+                    meta_2d, cluster_col="cluster_2D", label_col="World Zone"
+                )
+                adna.save_report(
+                    summary_df,
+                    results_dir / f"{impute_method}_{reduce_method}_cluster_vs_label.csv"
+                )
+                print(f"[OK] Saved cluster-label comparison report.")
+            except Exception as e:
+                print(f"[WARN] Cluster-label comparison failed: {e}")
 
         return {
             "imputation_method": impute_method,
@@ -152,8 +201,7 @@ def main():
     # === 4. 需要测试的组合 ===
     # impute_methods = ["mode", "mean", "knn","knn_hamming"]
     # reduce_methods = ["umap", "tsne", "mds", "isomap"]
-    impute_methods = ["knn","knn_hamming_abs","knn_hamming_adaptive","knn_hybrid_autoalpha"]
-    # impute_methods = ["knn_hybrid_autoalpha"]
+    impute_methods = ["knn_hybrid_autoalpha"]
     reduce_methods = ["tsne"]
 
     runtime_records = []
