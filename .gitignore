@@ -1,7 +1,7 @@
 # =====================================================
 #  Project: ancient-dna-viz
 #  Environment: PyCharm + Python 3 + Virtualenv
-#  Purpose: Ignore all unnecessary build/cache/log/data files
+#  Purpose: Ignore all temporary, cache, build, and data files
 # =====================================================
 
 # ----------------------------
@@ -15,25 +15,32 @@ __pycache__/
 #  虚拟环境 & IDE 文件
 # ----------------------------
 .venv/
-env/
 venv/
+env/
 .idea/
 .vscode/
 
 # ----------------------------
-#  覆盖率 / 测试输出
+#  测试 / 覆盖率输出
 # ----------------------------
 .coverage
+*.coverage
 coverage.xml
 htmlcov/
-.cache/
-pytest_cache/
-*.cover
-*.coverage
+.pytest_cache/
 .tox/
 nosetests.xml
 test-results/
 junit*.xml
+
+# ----------------------------
+#  构建与分发产物
+# ----------------------------
+build/
+dist/
+*.egg-info/
+.eggs/
+MANIFEST
 
 # ----------------------------
 #  临时 / 日志 / 运行时文件
@@ -47,15 +54,6 @@ junit*.xml
 Thumbs.db
 
 # ----------------------------
-#  构建与分发
-# ----------------------------
-build/
-dist/
-*.egg-info/
-.eggs/
-MANIFEST
-
-# ----------------------------
 #  文档生成输出
 # ----------------------------
 docs/_build/
@@ -67,15 +65,15 @@ docs/.ipynb_checkpoints/
 #  数据文件（本地原始或中间结果）
 # ----------------------------
 data/
-!data/README.md          # 可保留说明文件（如果有）
+!data/README.md
 
-# 若只想忽略原始数据，而保留分析结果，可改为：
+# 若要区分阶段，可改为：
 # data/raw/
 # data/processed/
 # data/results/
 
 # ----------------------------
-#  项目生成报告、分析结果
+#  项目输出 / 报告文件
 # ----------------------------
 results/
 reports/
@@ -95,12 +93,11 @@ outputs/
 # ----------------------------
 #  系统特定文件
 # ----------------------------
-.DS_Store
 ehthumbs.db
 Icon?
 
 # ----------------------------
-#  备份或私有脚本
+#  私有脚本 / 密钥
 # ----------------------------
 scripts/private/
 *.secret
