@@ -11,7 +11,7 @@ if __name__ == "__main__":
     print(f"[INFO] Added to sys.path: {src_path}")
     print("[INFO] Running pytest...\n")
 
-    errno = pytest.main(["-v"])
+    errno = pytest.main(["--disable-warnings"])
     raise SystemExit(errno)
 
 

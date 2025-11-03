@@ -56,7 +56,11 @@ def run_impute_reduce_pipeline(X, meta, impute_method, reduce_method, labels, pr
     print(f"\n[INFO] Running combination → Impute: {impute_method.upper()} | Reduce: {reduce_method.upper()}")
 
     # 1. 缺失值填补
+    start_impute = time.time()
     Xi = adna.impute_missing(X, method=impute_method)
+    impute_elapsed = round(time.time() - start_impute, 3)
+    print(f"[OK] Imputation ({impute_method}) completed in {impute_elapsed:.2f}s")
+
     geno_out = processed_dir / f"geno_{impute_method}.csv"
     meta_out = processed_dir / f"meta_{impute_method}.csv"
     adna.save_csv(Xi, geno_out)
@@ -95,14 +99,14 @@ def run_impute_reduce_pipeline(X, meta, impute_method, reduce_method, labels, pr
         print("\n[INFO] Running hierarchical clustering analysis...")
 
         if auto_cluster:
-            best_k = 6
+            best_k = 10
 
             # best_k = adna.find_optimal_clusters(
             #     Xi, linkage_method="ward", metric="euclidean", cluster_range=range(2, 10), plot=True
             # )
             print(f"[INFO] Using optimal cluster number: {best_k}")
         else:
-            best_k = 6
+            best_k = 10
 
         # 高维聚类
         meta_hd = adna.cluster_highdimensional(Xi, meta.copy(), n_clusters=best_k)
@@ -141,7 +145,9 @@ def run_impute_reduce_pipeline(X, meta, impute_method, reduce_method, labels, pr
             "imputation_method": impute_method,
             "embedding_method": reduce_method,
             "label": labels.name if labels is not None else "None",
-            "runtime_s": elapsed,
+            "impute_time_s": impute_elapsed,
+            "reduce_time_s": elapsed,
+            "total_time_s": round(impute_elapsed + elapsed, 3),
             "status": "success"
         }
 
@@ -152,7 +158,9 @@ def run_impute_reduce_pipeline(X, meta, impute_method, reduce_method, labels, pr
             "imputation_method": impute_method,
             "embedding_method": reduce_method,
             "label": labels.name if labels is not None else "None",
-            "runtime_s": None,
+            "impute_time_s": impute_elapsed if "impute_elapsed" in locals() else None,
+            "reduce_time_s": None,
+            "total_time_s": impute_elapsed if "impute_elapsed" in locals() else None,
             "error": str(e),
             "status": "failed"
         }
@@ -201,7 +209,7 @@ def main():
     # === 4. 需要测试的组合 ===
     # impute_methods = ["mode", "mean", "knn","knn_hamming"]
     # reduce_methods = ["umap", "tsne", "mds", "isomap"]
-    impute_methods = ["knn_hybrid_autoalpha"]
+    impute_methods = ['knn_hamming_adaptive','knn_hamming_balltree']
     reduce_methods = ["tsne"]
 
     runtime_records = []

@@ -3,6 +3,10 @@ import pandas as pd
 from typing import Tuple
 from sklearn.impute import KNNImputer
 from sklearn.neighbors import NearestNeighbors
+from sklearn.neighbors import BallTree
+from sklearn.decomposition import PCA
+from joblib import Parallel, delayed
+import multiprocessing
 
 def align_by_id(ids: pd.Series, X: pd.DataFrame, meta: pd.DataFrame, id_col: str = "Genetic ID") -> Tuple[pd.DataFrame, pd.DataFrame]:
     """
@@ -79,11 +83,17 @@ def filter_by_missing(X: pd.DataFrame, sample_missing: pd.Series, snp_missing: p
 
 def _fill_mode(Z: pd.DataFrame, fallback: float = 1) -> pd.DataFrame:
     """
-    列众数填补（默认方法）。
+    列众数填补（默认方法）
+    ===================================================
+    基于每列的众数（忽略 NaN）进行填补。
 
-    :param Z: 基因型矩阵 (pd.DataFrame)，行=样本，列=SNP。
-    :param fallback: 当整列均为空时的回退值（默认填 1）。
-    :return: 填补后的矩阵 (pd.DataFrame)。
+    :param Z: pd.DataFrame
+        基因型矩阵（行=样本，列=SNP）。
+    :param fallback: float, default=1
+        若整列均为空，则使用该值填补。
+    :return: pd.DataFrame
+        填补后的矩阵，与输入结构一致。
+
     说明:
         - 对每列分别计算众数（忽略 NaN）；
         - 若整列均为空，则使用 fallback；
@@ -110,9 +120,14 @@ def _fill_mode(Z: pd.DataFrame, fallback: float = 1) -> pd.DataFrame:
 def _fill_mean(X: pd.DataFrame) -> pd.DataFrame:
     """
     列均值填补（矢量化实现）。
+    ===================================================
+    使用每列均值替代缺失值，适合连续型数据。
 
-    :param X: 基因型矩阵 (pd.DataFrame)，行=样本，列=SNP。
-    :return: 填补后的矩阵。
+    :param X: pd.DataFrame
+        基因型矩阵（行=样本，列=SNP）。
+    :return: pd.DataFrame
+        填补后的矩阵。
+
     说明:
         - 对每列单独计算均值；
         - 用 fillna() 替换 NaN；
@@ -127,16 +142,23 @@ def _fill_mean(X: pd.DataFrame) -> pd.DataFrame:
 
 def _fill_knn(X: pd.DataFrame, n_neighbors: int = 5, metric: str = "nan_euclidean") -> pd.DataFrame:
     """
-    KNN 填补（基于样本相似度），使用 sklearn.impute.KNNImputer。
+    基于 sklearn 的 KNN 填补（Euclidean）
+    ===================================================
+    使用 KNNImputer，计算样本间欧氏距离（忽略 NaN）。
 
-    :param X: 基因型矩阵 (pd.DataFrame)。
-    :param n_neighbors: 近邻数（默认 5）。
-    :param metric: 距离度量方式（默认 "nan_euclidean"）。
-    :return: 填补后的矩阵。
+    :param X: pd.DataFrame
+        基因型矩阵。
+    :param n_neighbors: int, default=5
+        近邻数量。
+    :param metric: str, default="nan_euclidean"
+        距离度量方式。
+    :return: pd.DataFrame
+        填补后的矩阵。
+
     说明:
         - 使用 sklearn.impute.KNNImputer；
-        - metric='nan_euclidean' 表示计算距离时自动忽略 NaN；
-        - 每个样本缺失值由最相似样本的均值替代。
+        - 自动忽略 NaN 计算距离；
+        - 大型数据集会自动提示性能警告。
     """
     if X.shape[0] > 5000:
         print(f"[WARN] Large dataset detected ({X.shape[0]} samples) — KNN imputation may be slow.")
@@ -147,24 +169,29 @@ def _fill_knn(X: pd.DataFrame, n_neighbors: int = 5, metric: str = "nan_euclidea
     return pd.DataFrame(M, columns=X.columns, index=X.index)
 
 
+def _fill_knn_hamming_abs(X: pd.DataFrame, n_neighbors: int = 5, fallback: float = 1.0, strategy: str = "mode", random_state: int | None = None) -> pd.DataFrame:
+    """
+    Hamming(abs) 等权 KNN 填补
+    ===================================================
+    使用未归一化汉明距离的 KNN 填补方法。（性能较慢，仅推荐小样本使用）
 
+    :param X: pd.DataFrame
+        基因型矩阵（值 ∈ {0,1,NaN}）。
+    :param n_neighbors: int, default=5
+        近邻数量。
+    :param fallback: float, default=1.0
+        若所有邻居均缺失时的回退值。
+    :param strategy: str, default="mode"
+        填补策略："mode" / "round" / "mean" / "prob"。
+    :param random_state: int | None
+        随机种子，仅在 "prob" 下生效。
+    :return: pd.DataFrame
+        填补后的矩阵。
 
-
-
-def _fill_knn_hamming_abs(X: pd.DataFrame, n_neighbors: int = 5, fallback: float = 1.0) -> pd.DataFrame:
-    """ 基于 sklearn.NearestNeighbors 的高性能“未归一化汉明距离” KNN 填补。 高维 SNP 数据推荐使用该版本。
-
-    :param X: 基因型矩阵 (pd.DataFrame)，行=样本，列=SNP（值为 0/1/2/NaN）。
-    :param n_neighbors: 近邻数量（默认 5）。 :param fallback: 若所有邻居该列均缺失时的回退值（默认 1.0）。
-    :return: 填补后的矩阵 (pd.DataFrame)，与输入结构相同。
-    说明： - 使用 sklearn.neighbors.NearestNeighbors(metric="hamming")；
-    - 由于 sklearn.hamming 是归一化的（比例差异），结果等价于老师的未归一化版本的缩放；
-    - 速度远超纯 Python 双循环实现；
-    - 每个缺失值用 K 个最近邻在该列的均值填补；
-    - 若无有效邻居，则用 fallback。
     """
     X = X.copy()
     n_samples, n_features = X.shape
+    rng = np.random.default_rng(random_state)
 
     # sklearn 的 Hamming 不能处理 NaN，先替换为哑值
     X_tmp = X.fillna(-1)
@@ -185,228 +212,473 @@ def _fill_knn_hamming_abs(X: pd.DataFrame, n_neighbors: int = 5, fallback: float
                 vals = X.iloc[indices[i], j]
                 mask = ~vals.isna()
                 if mask.any():
-                    X.iat[i, j] = vals[mask].mean()
+                    if strategy == "mode":
+                        X.iat[i, j] = vals[mask].mode().iat[0]
+                    elif strategy == "round":
+                        X.iat[i, j] = round(vals[mask].mean())
+                    elif strategy == "prob":
+                        p = vals[mask].mean()
+                        X.iat[i, j] = rng.binomial(1, p)
+                    elif strategy == "mean":
+                        X.iat[i, j] = vals[mask].mean()
+                    else:
+                        raise ValueError(f"Unknown strategy: {strategy}")
                 else:
                     X.iat[i, j] = fallback
-    print(f"[OK] Hamming(abs) KNN complete — k={n_neighbors}, fallback={fallback}")
+    print(f"[OK] Hamming(abs) KNN complete — k={n_neighbors}, strategy={strategy}, fallback={fallback}, seed={random_state}")
     return X
 
 
-def _fill_knn_hamming_adaptive(X: pd.DataFrame, n_neighbors: int = 5, fallback: float = 1.0, target_decay: float = 0.5,log_samples: int = 3) -> pd.DataFrame:
+def _fill_knn_hamming_adaptive(X: pd.DataFrame, n_neighbors: int = 5, fallback: float = 1.0, target_decay: float = 0.5, strategy: str = "mode", log_samples: int = 3, random_state: int | None = None, parallel: bool = True) -> pd.DataFrame:
     """
-    基于加权 KNN（汉明距离）的智能缺失填补。
-    高维 SNP 数据推荐使用该版本。
+    Adaptive Weighted Hamming KNN（自适应加权填补）
+    ===================================================
+    采用自适应衰减 α 的加权 KNN 填补算法。
+    支持向量化与并行，适合高维稀疏 SNP 矩阵。
 
-    :param X: 基因型矩阵 (pd.DataFrame)，行=样本，列=SNP（值为 0/1/NaN）。
-    :param n_neighbors: 近邻数量（默认 5）。
-    :param fallback: 若所有邻居该列均缺失时的回退值（默认 1.0）。
-    :param target_decay: α 自适应目标（0~1），表示中等距离的邻居权重衰减到多少（默认 0.5）。
-                         例如 target_decay=0.5 → 中位距离邻居的权重为 0.5。
-    :param log_samples: 打印日志的样本数量（默认随机展示 3 个）。
-    :return: 填补后的矩阵 (pd.DataFrame)，与输入结构相同。
+    :param X: pd.DataFrame
+        基因型矩阵（行=样本，列=SNP）。
+    :param n_neighbors: int, default=5
+        近邻数量。
+    :param fallback: float, default=1.0
+        回退值。
+    :param target_decay: float, default=0.5
+        控制权重中位邻居衰减比例。
+    :param strategy: str, default="mode"
+        填补策略："mode"/"round"/"mean"/"prob"。
+    :param log_samples: int, default=3
+        日志样本数量（打印 α 与部分权重）。
+    :param random_state: int | None
+        随机种子。
+    :param parallel: bool, default=True
+        是否启用列级并行。
+    :return: pd.DataFrame
+        填补后的矩阵。
 
-    说明：
-        - 基于 sklearn.neighbors.NearestNeighbors(metric="hamming")；
-        - 使用“未归一化汉明距离”以更符合基因差异解释；
-        - 每个缺失值使用邻居加权平均：
-              weight_i = exp(-alpha * distance_i)
-          （即距离越近权重越大）
-        - 若所有邻居该列均缺失，则使用 fallback；
+    特性说明:
+        - 向量化 α 与权重计算；
+        - 列级并行填补；
+        - 可打印部分样本的权重分布；
+        - 高精度、速度快，适合中大规模数据。
     """
     X = X.copy()
     n_samples, n_features = X.shape
+    rng = np.random.default_rng(random_state)
 
-    # sklearn 的 Hamming 不能处理 NaN，先替换为哑值（例如 -1）
-    X_tmp = X.fillna(-1)
+    # === 替换 NaN, 构建 BallTree, 并计算未归一化汉明距离===
+    X_tmp = X.fillna(-1).to_numpy()
+    tree = BallTree(X_tmp, metric="hamming")  # type: ignore[arg-type]
+    dist, ind = tree.query(X_tmp, k=n_neighbors + 1)
+    dist, ind = dist[:, 1:], ind[:, 1:]  # 去掉自身
+    dist *= n_features  # 未归一化汉明距离
 
-    # 构建最近邻模型（Hamming 距离）
-    nbrs = NearestNeighbors(n_neighbors=n_neighbors + 1, metric="hamming")
-    nbrs.fit(X_tmp)
+    # === 向量化计算 α & 权重矩阵 ===
+    median_d = np.median(dist, axis=1, keepdims=True)
+    alpha = np.log(1 / target_decay) / np.maximum(median_d, 1e-9)
+    weights = np.exp(-alpha * dist)
 
-    # 获取最近邻（包括自身）
-    distances, indices = nbrs.kneighbors(X_tmp)
-    distances *= n_features  # 转换为“未归一化汉明距离”
-    indices = indices[:, 1:]     # 去掉自身
-    distances = distances[:, 1:] # 同步去掉自身
-
-    # 随机挑选样本用于日志打印
-    rng = np.random.default_rng(42)
+    # 随机打印部分样本日志
     log_idx = rng.choice(n_samples, size=min(log_samples, n_samples), replace=False)
 
-    # 执行加权填补
-    for i in range(n_samples):
-        d = distances[i]
-        # 自适应计算 α：保证中位距离邻居的权重衰减到 target_decay
-        median_d = np.median(d)
-        alpha = np.log(1 / target_decay) / median_d if median_d > 1e-9 else 1.0
+    # for i in log_idx:
+    #     print(f"[INFO] Sample #{i:<4d} | α={alpha[i,0]:.4f} | median_d={median_d[i,0]:.2f} | mean_d={dist[i].mean():.2f}")
 
-        # 打印日志（只显示部分样本）
-        if i in log_idx:
-            w = np.exp(-alpha * d)
-            print(f"[INFO] Sample #{i:<4d} mean_d={d.mean():.2f} | α={alpha:.4f} | median_d={median_d:.2f} | w={np.round(w[:5],2)}")
+    for i in log_idx:
+        # 打印前 5 个邻居权重（保留两位小数）
+        w_preview = np.round(weights[i, :5], 3)
+        print(f"[INFO] Sample #{i:<4d} | α={alpha[i, 0]:.4f} | median_d={median_d[i, 0]:.2f} | "
+              f"mean_d={dist[i].mean():.2f} | w[:5]={w_preview}")
 
-        # 遍历每个特征，执行缺失填补
+    # === 定义单列填补函数 ===
+    def _process_column(j: int) -> np.ndarray:
+        """
+        对单列执行缺失值填补逻辑（可并行）。
+        ---------------------------------------------------
+        :param j: int 列索引。
+
+        :return: col: np.ndarray 该列填补后的完整列向量。
+
+        逻辑:
+            1. 找出该列中所有缺失样本；
+            2. 对每个缺失样本，根据其 k 个邻居进行加权计算；
+            3. 根据 strategy 选择不同的填补方式；
+            4. 若邻居均缺失，则使用 fallback。
+        """
+        # 拷贝该列的原始数值（NaN 已替换为 -1）
+        col = X_tmp[:, j].copy()
+
+        # 找出该列缺失的行索引（原始 DataFrame 判断 NaN）
+        missing_rows = np.where(np.isnan(X.iloc[:, j].to_numpy()))[0]
+        if len(missing_rows) == 0:
+            return col # 若该列无缺失值则直接返回
+
+        # 遍历所有缺失行，逐样本填补
+        for i in missing_rows:
+            vals = X_tmp[ind[i], j]     # 当前样本 i 的近邻在第 j 列的取值
+            mask = vals != -1           # 过滤掉缺失邻居
+            if not np.any(mask):        # 若所有邻居都缺失
+                col[i] = fallback
+                continue
+            v, w = vals[mask], weights[i, mask]  # 有效邻居值及对应权重
+            weighted_mean = np.average(v, weights=w)
+
+            # === 根据不同策略执行填补 ===
+            if strategy == "mode":
+                # 权重众数（通过加权投票）
+                val0 = np.sum(w[v == 0])
+                val1 = np.sum(w[v == 1])
+                col[i] = 1.0 if val1 >= val0 else 0.0
+            elif strategy == "round":
+                # 四舍五入加权均值
+                col[i] = np.rint(weighted_mean)
+            elif strategy == "prob":
+                # 概率采样（按加权均值作为概率）
+                col[i] = rng.binomial(1, weighted_mean)
+            elif strategy == "mean":
+                # 连续加权均值
+                col[i] = weighted_mean
+            else:
+                raise ValueError(f"Unknown strategy: {strategy}")
+        return col
+
+    # === 并行或串行执行 ===
+    if parallel and n_features > 500:
+        # 获取当前 CPU 核心数，动态设定并行任务数量
+        n_jobs = multiprocessing.cpu_count()
+        print(f"[INFO] Adaptive KNN parallel mode — {n_features} columns, jobs={n_jobs}")
+
+        # 使用 Joblib 并行执行每列填补
+        # delayed(_process_column)(j) 表示并行调用列级函数
+        new_cols = Parallel(n_jobs=n_jobs)(
+            delayed(_process_column)(j) for j in range(n_features)
+        )
+
+        # 将结果按列堆叠（列顺序与原始矩阵保持一致）
+        X_filled = pd.DataFrame(np.column_stack(new_cols), columns=X.columns)
+    else:
+        # 串行模式：逐列依次执行填补
+        # 仅在该列存在 NaN 时才调用填补函数，避免不必要的计算
         for j in range(n_features):
-            if pd.isna(X.iat[i, j]):
-                vals = X.iloc[indices[i], j]
-                mask = ~vals.isna()
-                if mask.any():
-                    X.iat[i, j] = np.average(vals[mask], weights=np.exp(-alpha * d[mask]))
-                else:
-                    X.iat[i, j] = fallback
+            if X.iloc[:, j].isna().any():
+                X_tmp[:, j] = _process_column(j)
 
-    print(f"[OK] Adaptive Weighted KNN complete — target_decay={target_decay}, k={n_neighbors}")
-    return X
+        # 将填补后的 numpy 数组重新封装为 DataFrame
+        X_filled = pd.DataFrame(X_tmp, columns=X.columns)
+
+    print(f"[OK] Adaptive Weighted KNN (fast) complete — k={n_neighbors}, strategy={strategy}, parallel={parallel}")
+    return X_filled
 
 
-def _fill_knn_hybrid_autoalpha(
-    X: pd.DataFrame,
-    n_neighbors: int = 5,
-    fallback: float = 1.0,
-    target_decay: float = 0.5,
-    log_samples: int = 3
-) -> pd.DataFrame:
+def _fill_knn_hamming_balltree(X: pd.DataFrame, n_neighbors: int = 5, fallback: float = 1.0, strategy: str = "mode", parallel: bool = False, n_jobs: int = -1) -> pd.DataFrame:
     """
-    混合 KNN 缺失填补（Hamming + Euclidean，自适应 α 版本）。
+    BallTree 加速 Hamming KNN 填补
+    ===================================================
+    基于 BallTree 的 Hamming 距离加速实现，
+    支持列向量化与多核并行。
 
-    特点：
-        - 用 Hamming 确定邻居；
-        - 用 Euclidean 计算加权；
-        - 每个样本根据其邻居欧式距离分布自动确定 α；
-        - 兼顾生物合理性与平滑性。
+    :param X: pd.DataFrame
+        基因型矩阵（行=样本，列=SNP）。
+    :param n_neighbors: int, default=5
+        近邻数量。
+    :param fallback: float, default=1.0
+        若所有邻居均缺失时的回退值。
+    :param strategy: str, default="mode"
+        填补策略："mode"/"mean"/"round"。
+    :param parallel: bool, default=False
+        是否启用并行。
+    :param n_jobs: int, default=-1
+        并行任务数（默认所有 CPU 核）。
+    :return: pd.DataFrame
+        填补后的矩阵。
 
-    :param X: 基因型矩阵 (pd.DataFrame)，行=样本，列=SNP（值为 0/1/2/NaN）。
-    :param n_neighbors: 近邻数量（默认 5）。
-    :param fallback: 若所有邻居该列均缺失时的回退值（默认 1.0）。
-    :param target_decay: α 自适应目标，表示中位距离邻居的权重衰减到多少（默认 0.5）。
-                         例如 target_decay=0.5 → 中位距离邻居的权重 = 0.5。
-    :param log_samples: 打印日志的样本数量（默认随机展示 3 个）。
-    :return: 填补后的矩阵 (pd.DataFrame)。
-
-    说明：
-        - 比固定 α 的 hybrid 更智能；
-        - α 根据每个样本的欧式距离自适应调整；
-        - 对高维 SNP 数据特别稳健。
+    特性说明:
+        - BallTree 空间索引加速；
+        - 向量化 + 列级并行；
+        - 速度快、内存占用低；
+        - 推荐中等规模数据使用。
     """
     X = X.copy()
     n_samples, n_features = X.shape
+    X_tmp = X.fillna(-1).to_numpy()
 
-    # 替换 NaN 为占位符（Hamming 不能处理 NaN）
-    X_tmp = X.fillna(-1)
+    # 小数据集时禁用并行（避免进程创建开销）
+    threshold = 2e6  # 元素数量阈值
+    if parallel and (n_samples * n_features < threshold):
+        print(f"[AUTO] Data too small ({n_samples}×{n_features}), disabling parallel for efficiency.")
+        parallel = False
 
-    # 1. 先用 Hamming 找邻居
-    nbrs = NearestNeighbors(n_neighbors=n_neighbors + 1, metric="hamming")
-    nbrs.fit(X_tmp)
-    distances_ham, indices = nbrs.kneighbors(X_tmp)
-    indices = indices[:, 1:]  # 去掉自身
+    # 构建 BallTree 并查询最近邻索引
+    tree = BallTree(X_tmp, metric="hamming")  # type: ignore[arg-type]
+    dist, ind = tree.query(X_tmp, k=n_neighbors + 1)
+    ind = ind[:, 1:]  # 去掉自身
 
-    # 随机挑选样本日志
-    rng = np.random.default_rng(42)
-    log_idx = rng.choice(n_samples, size=min(log_samples, n_samples), replace=False)
+    def _process_column(j: int) -> np.ndarray:
+        """
+        对单列执行缺失值填补逻辑（可并行）。
+        ---------------------------------------------------
+        :param j: int 列索引。
 
-    for i in range(n_samples):
-        Xi = X_tmp.iloc[i].to_numpy()
-        neigh = X_tmp.iloc[indices[i]].to_numpy()
+        :return: col: np.ndarray 该列填补后的完整列向量。
 
-        # 忽略 -1（缺失）位，仅计算有效位的欧式距离
-        mask_valid = (Xi != -1)
-        if not np.any(mask_valid):
-            continue
+        逻辑:
+            1. 找出该列中所有缺失样本；
+            2. 对每个缺失样本提取其邻居；
+            3. 根据 strategy 选择不同的填补方式；
+            4. 若邻居均缺失，则使用 fallback。
+        """
+        # 对每个缺失样本提取其邻居
+        col_values = X_tmp[:, j].copy()
+        new_col = col_values.copy()
 
-        diffs = neigh[:, mask_valid] - Xi[mask_valid]
-        dists_eu = np.sqrt(np.sum(diffs ** 2, axis=1))
-        dists_eu = np.where(dists_eu == 0, 1e-9, dists_eu)  # 避免除 0
+        # 找出该列中缺失的样本索引
+        missing_rows = np.where(np.isnan(X.iloc[:, j].to_numpy()))[0]
+        if len(missing_rows) == 0:
+            return new_col
 
-        # 2. 自适应 α（控制中位距离邻居权重 = target_decay）
-        median_d = float(np.median(dists_eu))
-        alpha = np.log(1 / target_decay) / median_d if median_d > 1e-9 else 1.0
+        # 获取这些缺失行的邻居矩阵（形状 = [缺失数, k]）
+        neighbor_matrix = X_tmp[ind[missing_rows], j]  # shape = (num_missing, k)
 
-        # 3. 计算权重
-        exp_w = np.exp(-alpha * (dists_eu - dists_eu.min()))
-        sw = exp_w.sum()
-        weights = exp_w / sw if sw > 1e-12 else np.ones_like(exp_w) / len(exp_w)
-
-        # 4. 日志输出
-        if i in log_idx:
-            mean_d = dists_eu.mean()
-            w_preview = np.round(weights[:5], 2)
-            print(f"[INFO] Sample #{i:<4d} mean_d={mean_d:.2f} | α={alpha:.4f} | median_d={median_d:.2f} | w={w_preview}")
-
-        # 4. 执行填补
-        for j in range(n_features):
-            if pd.isna(X.iat[i, j]):
-                vals = X.iloc[indices[i], j]
-                mask = ~vals.isna()
-                if mask.any():
-                    sub_w = weights[mask]
-                    s = sub_w.sum()
-                    X.iat[i, j] = np.average(vals[mask], weights=sub_w) if s > 1e-12 else fallback
+        # === “众数”策略 ===
+        if strategy == "mode":
+            for idx, vals in enumerate(neighbor_matrix):
+                valid = vals[vals != -1] # 有效邻居
+                if valid.size == 0:
+                    new_col[missing_rows[idx]] = fallback
                 else:
-                    X.iat[i, j] = fallback
+                    # 统计邻居值出现次数，取最多的作为填充值
+                    uniq, counts = np.unique(valid, return_counts=True)
+                    new_col[missing_rows[idx]] = uniq[np.argmax(counts)]
 
-    print(f"[OK] Hybrid Auto alpha KNN complete — k={n_neighbors}, target_decay={target_decay}")
+        # === “均值/四舍五入”策略 ===
+        elif strategy in ("mean", "round"):
+            # 将缺失邻居标记为 NaN，计算行均值
+            means = np.where(neighbor_matrix != -1, neighbor_matrix, np.nan)
+            means = np.nanmean(means, axis=1)
+            means[np.isnan(means)] = fallback  # 若全缺失则填 fallback
+            new_col[missing_rows] = np.rint(means) if strategy == "round" else means
+        else:
+            raise ValueError(f"Unknown strategy: {strategy}")
+        return new_col
+
+    # === 并行或串行执行列级填补 ===
+    if parallel:
+        print(f"[INFO] Parallel BallTree filling — {n_features} columns, jobs={n_jobs}")
+
+        # 使用 Joblib 并行地处理所有列
+        # 每列调用一次 _process_column()，各进程独立运行
+        new_cols = Parallel(n_jobs=n_jobs)(
+            delayed(_process_column)(j) for j in range(n_features)
+        )
+
+        # 将所有处理好的列组合成新的 DataFrame
+        X_filled = pd.DataFrame(np.column_stack(new_cols), columns=X.columns)
+    else:
+        # 串行执行模式（单线程）
+        # 遍历每一列，仅在存在 NaN 时才调用填补函数
+        for j in range(n_features):
+            if X.iloc[:, j].isna().any():
+                X_tmp[:, j] = _process_column(j)
+
+        # 将填补完成的矩阵重新封装为 DataFrame
+        X_filled = pd.DataFrame(X_tmp, columns=X.columns)
+
+    print(f"[OK] Hamming(BallTree-fast) KNN complete — k={n_neighbors}, strategy={strategy}, parallel={parallel}")
+    return X_filled
+
+
+def _fill_knn_faiss(X: pd.DataFrame, n_neighbors: int = 5, n_components: int = 50, fallback: float = 1.0, strategy: str = "mode", random_state: int | None = 42) -> pd.DataFrame:
+    """
+    PCA + Faiss 近似 KNN 填补（超大规模版）（暂未验证）
+    ===================================================
+    适用于超大样本（>10,000），通过 PCA 降维
+    后使用 Faiss 加速最近邻搜索。
+    （暂未验证）
+
+    :param X: pd.DataFrame
+        基因型矩阵（值 ∈ {0,1,NaN}）。
+    :param n_neighbors: int
+        近邻数量。
+    :param n_components: int, default=50
+        PCA 降维维数。
+    :param fallback: float
+        若邻居均缺失时使用该值。
+    :param strategy: str
+        填补策略："mode"/"mean"/"round"。
+    :param random_state: int | None
+        随机种子。
+    :return: pd.DataFrame
+        填补后的矩阵。
+
+    特性说明:
+        - 支持 GPU / CPU 加速；
+        - 可处理十万级样本；
+        - 精度略低但速度极快。
+    """
+    try:
+        import faiss  # type: ignore
+    except ImportError:
+        raise ImportError("Faiss 未安装，请运行: pip install faiss-cpu 或 faiss-gpu")
+
+    X = X.copy()
+    X_tmp = X.fillna(X.mean())
+    print(f"[INFO] PCA降维至 {n_components} 维...")
+    Z = PCA(n_components=n_components, random_state=random_state).fit_transform(X_tmp)
+
+    print("[INFO] 构建 Faiss 索引...")
+    index = faiss.IndexFlatL2(Z.shape[1])
+    index.add(Z.astype("float32"))  # type: ignore[attr-defined]
+    D, I = index.search(Z.astype("float32"), n_neighbors + 1)  # type: ignore[attr-defined]
+    I = I[:, 1:]
+
+    for i in range(X.shape[0]):
+        nan_cols = np.where(X.iloc[i].isna())[0]
+        for j in nan_cols:
+            vals = X.iloc[I[i], j].dropna()
+            if vals.empty:
+                X.iat[i, j] = fallback
+                continue
+            if strategy == "mode":
+                X.iat[i, j] = vals.mode().iat[0]
+            elif strategy == "mean":
+                X.iat[i, j] = vals.mean()
+            elif strategy == "round":
+                X.iat[i, j] = round(vals.mean())
+    print(f"[OK] PCA+Faiss KNN complete — k={n_neighbors}, dim={n_components}, strategy={strategy}")
     return X
 
 
-def _fill_knn_auto(
-    X: pd.DataFrame,
-    n_neighbors: int = 5,
-    fallback: float = 1.0,
-    size_threshold: int = 1000,
-    missing_threshold: float = 0.3,
-    verbose: bool = True,
-) -> pd.DataFrame:
+def _fill_knn_auto(X: pd.DataFrame, n_neighbors: int = 5, fallback: float = 1.0, missing_threshold: float = 0.3, random_state: int | None = None, verbose: bool = True) -> pd.DataFrame:
     """
-    自动选择最合适的 KNN 填补算法。
+    自动选择最优 KNN 填补算法（Auto-select）
+    ===================================================
+    根据样本规模与缺失率自动选择最佳策略。
 
-    策略：
-        - 若样本数 < 500 ：使用 NaN-aware 精确版本（小样本验证用）
-        - 若样本数 < 1000 且缺失率 < 30% ：使用 Adaptive Hamming
-        - 若样本数 ≥ 1000 ：使用 Hybrid Autoα（大规模高维推荐）
+    策略逻辑：
+        - 高缺失率 ≥ 30%          → Adaptive Hamming (prob)
+        - 小样本 (< 500)           → Hamming(abs)
+        - 中等规模 (500 ≤ n ≤ 5000) → BallTree
+        - 大规模 (5000 < n ≤ 10000) → Adaptive Weighted Hamming
+        - 特大规模 (> 10000)        → PCA + Faiss
 
-    :param X: 输入基因型矩阵 (pd.DataFrame)
-    :param n_neighbors: KNN 近邻数量
-    :param fallback: 全邻居缺失时的回退值（默认 1.0）
-    :param size_threshold: 样本数阈值（默认 1000）
-    :param missing_threshold: 缺失率阈值（默认 0.3）
-    :param verbose: 是否打印日志（默认 True）
-    :return: 填补后的 DataFrame
+    :param X: pd.DataFrame
+        基因型矩阵。
+    :param n_neighbors: int
+        近邻数量。
+    :param fallback: float
+        回退值。
+    :param missing_threshold: float
+        缺失率阈值（默认 0.3）。
+    :param random_state: int | None
+        随机种子。
+    :param verbose: bool
+        是否打印日志。
+
+    :return: pd.DataFrame
+        填补后的矩阵。
     """
+    # === 基础信息 ===
     n_samples, n_features = X.shape
     missing_rate = X.isna().mean().mean()
 
     if verbose:
         print(f"[INFO] Data shape: {n_samples}×{n_features} | Missing rate={missing_rate:.2%}")
 
+
+    # === 1. 高缺失率优先：使用自适应概率模式 ===
+    if missing_rate >= missing_threshold:
+        if verbose:
+            print("[AUTO] High missingness detected — using Adaptive Hamming (probabilistic mode).")
+        return _fill_knn_hamming_adaptive(
+            X,
+            n_neighbors=n_neighbors,
+            fallback=fallback,
+            target_decay=0.4,
+            strategy="prob",
+            random_state=random_state,
+        )
+
+    # === 2. 小样本 ===
     if n_samples < 500:
         if verbose:
-            print("[AUTO] Using Hamming (abs) KNN for small dataset.")
-        return _fill_knn_hamming_abs(X, n_neighbors, fallback)
+            print("[AUTO] Small dataset detected — using Hamming(abs) (equal-weight mode).")
+        return _fill_knn_hamming_abs(
+            X, n_neighbors=n_neighbors, fallback=fallback, strategy="mode"
+        )
 
-    elif n_samples < size_threshold and missing_rate < missing_threshold:
+    # === 3. 中等规模 ===
+    elif n_samples <= 5000:
         if verbose:
-            print("[AUTO] Using adaptive Hamming KNN (balanced).")
-        return _fill_knn_hamming_adaptive(X, n_neighbors, fallback)
+            print("[AUTO] Medium dataset — using BallTree-fast Hamming KNN (parallel optimized).")
+        return _fill_knn_hamming_balltree(
+            X,
+            n_neighbors=n_neighbors,
+            fallback=fallback,
+            strategy="mode",
+            parallel=True,
+        )
 
+    # === 4.大规模 ===
+    elif n_samples <= 10000:
+        if verbose:
+            print("[AUTO] Large dataset — using Adaptive Weighted Hamming KNN (weighted decay).")
+        return _fill_knn_hamming_adaptive(
+            X,
+            n_neighbors=n_neighbors,
+            fallback=fallback,
+            target_decay=0.5,
+            strategy="mode",
+            random_state=random_state,
+        )
+
+    # === 5. 特大规模 ===
     else:
         if verbose:
-            print("[AUTO] Using hybrid (Hamming+Euclidean) Autoα KNN (large-scale).")
-        return _fill_knn_hybrid_autoalpha(X, n_neighbors, fallback)
+            print("[AUTO] Very large dataset — trying PCA + Faiss approximate KNN.")
+        try:
+            return _fill_knn_faiss(
+                X,
+                n_neighbors=n_neighbors,
+                n_components=50,
+                fallback=fallback,
+                strategy="mode",
+                random_state=random_state,
+            )
+        except ImportError:
+            print("[WARN] Faiss not installed — fallback to Adaptive Weighted Hamming.")
+            return _fill_knn_hamming_adaptive(
+                X,
+                n_neighbors=n_neighbors,
+                fallback=fallback,
+                target_decay=0.5,
+                strategy="mode",
+                random_state=random_state,
+            )
 
 
 def impute_missing(X: pd.DataFrame, method: str = "mode", n_neighbors: int = 5) -> pd.DataFrame:
     """
-    缺失值填补。
+    通用缺失值填补入口函数
+    ===================================================
+    根据参数选择填补方法。
 
-    :param X: 基因型矩阵 (pd.DataFrame)。（编码规则: 0 = 参考等位基因, 1 = 变异等位基因, 3 = 缺失）
-    :param method: 填补方法（'mode' / 'mean' / 'knn' / 'knn_hamming_abs'/'knn_hamming_adaptive'/'knn_hybrid_autoalpha'/'knn_auto'）。
-    :param n_neighbors: KNN 填补时的近邻数（默认 5）。
-    :return: 填补后的矩阵 (pd.DataFrame)。
-        说明:
-        - mode: 每列取众数；
-        - mean: 每列取均值；
-        - knn : 基于样本相似度插补；
-        - 所有方法接口一致：接收 DataFrame，返回 DataFrame。
+    支持方法：
+        - "mode"                  → 众数填补；
+        - "mean"                  → 均值填补；
+        - "knn"                   → sklearn KNN；
+        - "knn_hamming_abs"       → 等权 Hamming；
+        - "knn_hamming_adaptive"  → 自适应加权 Hamming；
+        - "knn_hamming_balltree"  → BallTree 加速；
+        - "knn_hamming_faiss"     → PCA + Faiss 近似 KNN 填补
+        - "knn_auto"              → 自动选择策略。
+
+    :param X: pd.DataFrame
+        基因型矩阵（0=参考等位基因, 1=变异等位基因, 3=缺失）。
+    :param method: str
+        填补方法。
+    :param n_neighbors: int, default=5
+        KNN 近邻数。
+    :return: pd.DataFrame
+        填补后的矩阵。
     """
     print(f"[INFO] Impute missing values with method: {method}")
     method = method.lower()
@@ -422,13 +694,15 @@ def impute_missing(X: pd.DataFrame, method: str = "mode", n_neighbors: int = 5) 
     elif method == "knn":
         filled =  _fill_knn(Z, n_neighbors=n_neighbors)
     elif method == "knn_hamming_abs":
-        filled =  _fill_knn_hamming_abs(Z, n_neighbors=n_neighbors)
+        filled =  _fill_knn_hamming_abs(Z, n_neighbors=n_neighbors, random_state=42)
     elif method == "knn_hamming_adaptive":
-        filled =  _fill_knn_hamming_adaptive(Z, n_neighbors=n_neighbors)
-    elif method == "knn_hybrid_autoalpha":
-        filled =  _fill_knn_hybrid_autoalpha(Z, n_neighbors=n_neighbors)
+        filled =  _fill_knn_hamming_adaptive(Z, n_neighbors=n_neighbors, random_state=42)
+    elif method == "knn_hamming_balltree":
+        filled = _fill_knn_hamming_balltree(Z, n_neighbors=n_neighbors,parallel=True)
+    elif method == "knn_faiss":
+        filled = _fill_knn_faiss(Z, n_neighbors=n_neighbors, random_state=42)
     elif method == "knn_auto":
-        filled =  _fill_knn_auto(Z, n_neighbors=n_neighbors)
+        filled =  _fill_knn_auto(Z, n_neighbors=n_neighbors, random_state=42)
     else:
         raise ValueError(f"未知填补方法: {method}")
 
