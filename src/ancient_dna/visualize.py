@@ -157,9 +157,11 @@ def plot_missing_values(
     cmap_present: str = "#d95f02",
     cmap_missing: str = "#ffffff",
     show_ratio: bool = True,
+    max_pixels: int = 5e7,   # 自动切换阈值
 ) -> None:
     """
-    绘制缺失数据可视化图（白色 = 缺失）。
+    智能绘制缺失数据可视化图。
+    小矩阵使用完整像素图，大矩阵自动聚合为缺失率分布。
 
     :param df: 基因样本数据。
     :param save_path: 保存路径（如 "plot.png"）。若为 None，则直接显示。
@@ -167,8 +169,42 @@ def plot_missing_values(
     :param figsize: 图像大小 (宽, 高)，默认 (20, 10)。
     :param cmap_present: 非缺失值颜色，默认橙色 (#d95f02)。
     :param cmap_missing: 缺失值颜色，默认白色 (#ffffff)。
-    :param show_ratio: 是否同时显示缺失比例条形图，默认 True。
+    :param show_ratio: 是否同时显示缺失比例。
+    :param max_pixels: 当样本×SNP 超过此数时自动改用聚合图。
     """
+    n_rows, n_cols = df.shape
+    total = n_rows * n_cols
+
+    if total > max_pixels:
+        # ======= 大矩阵模式：聚合绘制 =======
+        print(f"[INFO] Large matrix detected ({n_rows}×{n_cols} ≈ {total/1e6:.1f}M pixels)")
+        print("[INFO] Switching to aggregated missingness summary mode...")
+
+        fig, ax = plt.subplots(1, 2, figsize=(12, 5))
+        row_missing = (df == missing_value).mean(axis=1)
+        col_missing = (df == missing_value).mean(axis=0)
+
+        ax[0].hist(row_missing, bins=50, color="#4c72b0", alpha=0.8)
+        ax[0].set_title("Sample missing rate distribution")
+        ax[0].set_xlabel("Missing rate per sample")
+        ax[0].set_ylabel("Count")
+
+        ax[1].hist(col_missing.sample(min(len(col_missing), 5000), random_state=42),
+                   bins=50, color="#dd8452", alpha=0.8)
+        ax[1].set_title("SNP missing rate distribution (sampled)")
+        ax[1].set_xlabel("Missing rate per SNP")
+        ax[1].set_ylabel("Count")
+
+        plt.tight_layout()
+        if save_path:
+            plt.savefig(save_path, dpi=300, bbox_inches="tight")
+            print(f"[OK] Aggregated missingness plot saved → {save_path}")
+        else:
+            plt.show()
+        plt.close(fig)
+        return
+
+    # ======= 正常模式：原像素绘图 =======
     print("[INFO] Plotting missing value pattern...")
     # Step 1. 创建缺失掩码
     mask = (df == missing_value).to_numpy()
