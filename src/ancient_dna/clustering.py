@@ -19,15 +19,15 @@ import matplotlib.pyplot as plt
 from scipy.cluster.hierarchy import linkage, dendrogram
 from sklearn.cluster import AgglomerativeClustering
 from sklearn.metrics import silhouette_score
-
+from tqdm import tqdm
 
 # =========================================================
 #  自动确定最佳聚类数
 # =========================================================
 def find_optimal_clusters(
     X: pd.DataFrame,
-    linkage_method: str = "ward",
-    metric: str = "euclidean",
+    linkage_method: str = "average",
+    metric: str = "hamming",
     cluster_range: range = range(2, 11),
     plot: bool = True
 ) -> int:
@@ -35,8 +35,8 @@ def find_optimal_clusters(
     自动搜索最佳聚类数（基于 Silhouette Score）。
 
     :param X: 输入矩阵 (pd.DataFrame)，每行表示样本，每列为特征。
-    :param linkage_method: 聚类合并策略（默认 "ward"，即最小方差法）。
-    :param metric: 距离度量方式（默认 "euclidean"）。
+    :param linkage_method: 聚类合并策略（默认 "average"，即最小方差法）。
+    :param metric: 距离度量方式（默认 "hamming"）。
     :param cluster_range: 聚类数搜索范围（默认 2~10）。
     :param plot: 是否绘制轮廓系数趋势图（默认 True）。
     :return: 最佳聚类数 (int)。
@@ -49,7 +49,7 @@ def find_optimal_clusters(
     scores = []
     print(f"[INFO] Searching optimal number of clusters ({cluster_range.start}–{cluster_range.stop - 1}) ...")
 
-    for k in cluster_range:
+    for k in tqdm(cluster_range, desc="[CLUSTER] Searching optimal k"):
         model = AgglomerativeClustering(n_clusters=k, linkage=linkage_method, metric=metric)
         labels = model.fit_predict(X)
         if len(np.unique(labels)) > 1:
@@ -79,7 +79,7 @@ def find_optimal_clusters(
 # =========================================================
 #  通用层次聚类核心逻辑
 # =========================================================
-def run_hierarchical_clustering(
+def _run_hierarchical_clustering(
     X: pd.DataFrame,
     n_clusters: int = 5,
     linkage_method: str = "ward",
@@ -109,7 +109,11 @@ def run_hierarchical_clustering(
         - 若 compute_silhouette=True，则返回聚类质量指标。
     """
     print(f"[INFO] Hierarchical clustering — linkage={linkage_method}, metric={metric}")
-    Z = linkage(X, method=linkage_method, metric=metric)
+    if isinstance(X, pd.DataFrame):
+        X_np = X.to_numpy(dtype=np.float32)
+    else:
+        X_np = np.asarray(X, dtype=np.float32)
+    Z = linkage(X_np, method=linkage_method, metric=metric)
 
     if plot:
         plt.figure(figsize=(14, 6))
@@ -143,7 +147,7 @@ def cluster_highdimensional(X_imputed: pd.DataFrame, meta: pd.DataFrame, n_clust
     :param n_clusters: 目标聚类数（默认 5）。
     :return: 含聚类结果的 meta 表。
     """
-    labels, score = run_hierarchical_clustering(X_imputed, n_clusters=n_clusters, plot=False)
+    labels, score = _run_hierarchical_clustering(X_imputed, n_clusters=n_clusters, plot=False)
     meta["cluster"] = labels.values
     score_str = f"{score:.3f}" if score is not None else "N/A"
     print(f"[OK] High-dimensional clustering complete — clusters={n_clusters}, silhouette={score_str}")
@@ -162,7 +166,7 @@ def cluster_on_embedding(embedding_df: pd.DataFrame, meta: pd.DataFrame, n_clust
     :param n_clusters: 聚类数（默认 5）。
     :return: 更新后的 meta（含 cluster_2D 列）。
     """
-    labels, score = run_hierarchical_clustering(embedding_df, n_clusters=n_clusters, plot=False)
+    labels, score = _run_hierarchical_clustering(embedding_df, n_clusters=n_clusters, plot=False)
     meta["cluster_2D"] = labels.values
     score_str = f"{score:.3f}" if score is not None else "N/A"
     print(f"[OK] Embedding-space clustering complete — clusters={n_clusters}, silhouette={score_str}")

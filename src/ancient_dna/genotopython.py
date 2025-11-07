@@ -113,7 +113,7 @@ def unpackfullgenofile(filename):
              - nsnp: SNP 数量
              - rlen: 每行记录长度
     """
-    geno_file, nind,nsnp,rlen=loadRawGenoFile(filename)
+    geno_file, nind,nsnp,rlen=loadRawGenoFile(filename,True)
     geno=np.fromfile(filename, dtype='uint8')[rlen:]
     geno.shape=(nsnp,rlen)
     geno=np.unpackbits(geno,axis=1)[:,:(2*nind)]

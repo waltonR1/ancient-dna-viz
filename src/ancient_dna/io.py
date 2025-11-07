@@ -1,3 +1,22 @@
+"""
+io.py
+-----------------
+文件读写（I/O）模块
+用于加载与保存基因型矩阵、样本注释表及通用 CSV 文件。
+
+功能：
+    - load_geno(): 读取基因型矩阵（CSV），提取样本ID与SNP矩阵；
+    - load_meta(): 读取样本注释表（含样本ID及元数据）；
+    - load_csv(): 通用CSV加载函数（带错误处理与信息提示）；
+    - save_csv(): 导出任意DataFrame为CSV文件。
+
+说明：
+    本模块是整个管线的数据入口与出口组件（Data I/O Layer），
+    负责数据文件的读取、清洗、转换与安全保存。
+    所有上层模块（如 preprocess、embedding、clustering 等）
+    均依赖此模块提供的标准化数据结构接口。
+"""
+
 from pathlib import Path
 from typing import Tuple, List
 import pandas as pd

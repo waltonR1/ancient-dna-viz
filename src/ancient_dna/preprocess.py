@@ -1,12 +1,20 @@
+import json
 import numpy as np
 import pandas as pd
 from typing import Tuple
 from sklearn.impute import KNNImputer
 from sklearn.neighbors import NearestNeighbors
 from sklearn.neighbors import BallTree
-from sklearn.decomposition import PCA
+from sklearn.decomposition import PCA, IncrementalPCA
 from joblib import Parallel, delayed
 import multiprocessing
+import warnings
+from tqdm import tqdm
+import psutil, time
+from pathlib import Path
+import pyarrow as pa, pyarrow.parquet as pq
+
+warnings.filterwarnings("ignore", category=pd.errors.SettingWithCopyWarning)
 
 def align_by_id(ids: pd.Series, X: pd.DataFrame, meta: pd.DataFrame, id_col: str = "Genetic ID") -> Tuple[pd.DataFrame, pd.DataFrame]:
     """
@@ -48,7 +56,21 @@ def compute_missing_rates(X: pd.DataFrame) -> Tuple[pd.Series, pd.Series]:
     """
     print("[INFO] Compute missing rate:")
     # 将编码 3 替换为 NaN 以便统计缺失率
-    Z = X.replace(3, np.nan)
+    Z = X.astype("float32", copy=True)
+
+    # 分块处理，避免生成巨大布尔矩阵
+    block_size = 2000  # 每次处理2000列，可根据内存调整
+    n_cols = Z.shape[1]
+
+    print(f"[INFO] Replacing missing value (3 → NaN) in {n_cols} columns (batch size = {block_size})")
+
+    for start in tqdm(range(0, n_cols, block_size), desc="Replacing values", ncols=100):
+        end = min(start + block_size, n_cols)
+        block = Z.iloc[:, start:end]
+        mask = block == 3
+        block[mask] = np.nan
+        Z.iloc[:, start:end] = block
+
     # 计算每行（样本）与每列（SNP）的缺失率
     sample_missing = Z.isna().mean(axis=1)
     snp_missing = Z.isna().mean(axis=0)
@@ -81,40 +103,106 @@ def filter_by_missing(X: pd.DataFrame, sample_missing: pd.Series, snp_missing: p
     return X_filtered
 
 
-def _fill_mode(Z: pd.DataFrame, fallback: float = 1) -> pd.DataFrame:
+def _fill_mode(Z: pd.DataFrame, fallback: float = 1, save_disk: bool = True) -> pd.DataFrame:
     """
-    列众数填补（默认方法）
+    列众数填补（大规模优化版）
     ===================================================
-    基于每列的众数（忽略 NaN）进行填补。
+    - 小规模数据：直接在内存中执行；
+    - 大规模数据：使用 NumPy memmap + PyArrow Parquet 边计算边落盘；
+    - 自动路径管理：中间文件保存在 data/processed，最终结果移动至 data/results。
 
     :param Z: pd.DataFrame
         基因型矩阵（行=样本，列=SNP）。
-    :param fallback: float, default=1
-        若整列均为空，则使用该值填补。
+    :param fallback: float
+        若整列均为空，则使用该值。
+    :param save_disk: bool, default=True
+        是否在超大规模数据时启用磁盘落盘模式。
     :return: pd.DataFrame
-        填补后的矩阵，与输入结构一致。
-
-    说明:
-        - 对每列分别计算众数（忽略 NaN）；
-        - 若整列均为空，则使用 fallback；
-        - 比 apply(axis=0) 实现更高效（避免逐列函数调度开销）。
-        - 输出与原矩阵结构完全一致。
+        填补后的矩阵；若启用落盘模式则返回空 DataFrame（结果已保存为 Parquet）。
     """
+    n_rows, n_cols = Z.shape
+    est_size_gb = n_rows * n_cols * 4 / 1024**3
+    free_mem_gb = psutil.virtual_memory().available / 1024**3
 
-    filled_cols = {}  # 用字典暂存所有填补结果
-    for col in Z.columns:
-        col_data = Z[col]
-        if col_data.isna().all():
-            mode_val = fallback
-        else:
-            mode_val = col_data.mode(dropna=True).iloc[0]
-        filled_cols[col] = col_data.fillna(mode_val)
+    print(f"[INFO] Mode filling started: {n_rows}×{n_cols} | est={est_size_gb:.1f} GB | free_mem={free_mem_gb:.1f} GB")
 
-    # 一次性拼接，避免碎片化
-    result = pd.concat(filled_cols, axis=1)
-    result.columns = Z.columns
-    result.index = Z.index
-    return result
+    # === 路径准备 ===
+    root_dir = Path(__file__).resolve().parents[2]  # 项目根目录
+    processed_dir = root_dir / "data" / "processed"
+    results_dir = root_dir / "data" / "results"
+    processed_dir.mkdir(parents=True, exist_ok=True)
+    results_dir.mkdir(parents=True, exist_ok=True)
+
+    timestamp = time.strftime("%Y%m%d_%H%M%S")
+    shard_dir = processed_dir / f"mode_filled_{timestamp}"
+    shard_dir.mkdir(parents=True, exist_ok=True)
+
+    # === 判定是否使用磁盘模式 ===
+    use_disk = save_disk and (est_size_gb > free_mem_gb * 0.6 or est_size_gb > 8)
+    # === 小规模数据：在内存中直接填补 ===
+    if not use_disk:
+        print(f"[INFO] Using in-memory mode filling (dataset size={est_size_gb:.1f} GB).")
+
+        filled_cols = {}  # 用字典暂存所有填补结果
+        for col in tqdm(Z.columns, desc="Mode filling", ncols=100):
+            col_data = Z[col]
+            if col_data.isna().all():
+                mode_val = fallback
+            else:
+                mode_val = col_data.mode(dropna=True).iloc[0]
+            filled_cols[col] = col_data.fillna(mode_val)
+
+        # 一次性拼接，避免碎片化
+        result = pd.concat(filled_cols, axis=1)
+        result.columns = Z.columns
+        result.index = Z.index
+        print(f"[OK] In-memory mode filling complete.")
+        return result
+
+    # === 大规模数据，启用磁盘写入（列分片方案） ===
+    print(f"[AUTO] Large dataset detected — using sharded Parquet write mode → {shard_dir}")
+    batch_cols = 2000
+    num_parts = (n_cols + batch_cols - 1) // batch_cols
+    # 创建索引列表
+    col_index_meta = []
+
+    for part_id, start in enumerate(tqdm(range(0, n_cols, batch_cols), desc="Mode filling (sharded)", ncols=100)):
+        end = min(start + batch_cols, n_cols)
+        block = Z.iloc[:, start:end]
+
+        # 计算分片众数
+        mode_vals = []
+        for c in block.columns:
+            s = block[c]
+            mv = s.mode(dropna=True)
+            if len(mv) == 0:
+                mode_vals.append(float(fallback))
+            else:
+                mode_vals.append(float(mv.iloc[0]))
+        mode_map = dict(zip(block.columns, mode_vals))
+
+        # 填补并写入 Parquet 文件
+        block_filled = block.fillna(value=mode_map)
+        part_path = shard_dir / f"part_{part_id:03d}.parquet"
+        table = pa.Table.from_pandas(block_filled.astype("float32"), preserve_index=False)
+        pq.write_table(table, part_path, compression="zstd")
+
+        # === 记录列信息到索引 ===
+        col_index_meta.append({
+            "part": f"part_{part_id:03d}.parquet",
+            "columns": block.columns.tolist()
+        })
+
+    # === 保存列索引元数据 ===
+    meta_path = shard_dir / "columns_index.json"
+    with open(meta_path, "w", encoding="utf-8") as f:
+        json.dump(col_index_meta, f, ensure_ascii=False, indent=2)
+
+    print(f"[OK] Sharded parquet written ({num_parts} files).")
+    print(f"[OK] Saved in processed directory → {shard_dir}")
+    print(f"[HINT] To load: ds.dataset(r'{shard_dir}', format='parquet')")
+
+    return pd.DataFrame()
 
 
 def _fill_mean(X: pd.DataFrame) -> pd.DataFrame:
@@ -206,7 +294,7 @@ def _fill_knn_hamming_abs(X: pd.DataFrame, n_neighbors: int = 5, fallback: float
     indices = indices[:, 1:] # 去掉自身
 
     # 执行填补
-    for i in range(n_samples):
+    for i in tqdm(range(n_samples), desc="Filling samples", ncols=100):
         for j in range(n_features):
             if pd.isna(X.iat[i, j]):
                 vals = X.iloc[indices[i], j]
@@ -313,13 +401,13 @@ def _fill_knn_hamming_adaptive(X: pd.DataFrame, n_neighbors: int = 5, fallback: 
             return col # 若该列无缺失值则直接返回
 
         # 遍历所有缺失行，逐样本填补
-        for i in missing_rows:
-            vals = X_tmp[ind[i], j]     # 当前样本 i 的近邻在第 j 列的取值
+        for row_idx in missing_rows:
+            vals = X_tmp[ind[row_idx], j]     # 当前样本 i 的近邻在第 j 列的取值
             mask = vals != -1           # 过滤掉缺失邻居
             if not np.any(mask):        # 若所有邻居都缺失
-                col[i] = fallback
+                col[row_idx] = fallback
                 continue
-            v, w = vals[mask], weights[i, mask]  # 有效邻居值及对应权重
+            v, w = vals[mask], weights[row_idx, mask]  # 有效邻居值及对应权重
             weighted_mean = np.average(v, weights=w)
 
             # === 根据不同策略执行填补 ===
@@ -327,16 +415,16 @@ def _fill_knn_hamming_adaptive(X: pd.DataFrame, n_neighbors: int = 5, fallback: 
                 # 权重众数（通过加权投票）
                 val0 = np.sum(w[v == 0])
                 val1 = np.sum(w[v == 1])
-                col[i] = 1.0 if val1 >= val0 else 0.0
+                col[row_idx] = 1.0 if val1 >= val0 else 0.0
             elif strategy == "round":
                 # 四舍五入加权均值
-                col[i] = np.rint(weighted_mean)
+                col[row_idx] = np.rint(weighted_mean)
             elif strategy == "prob":
                 # 概率采样（按加权均值作为概率）
-                col[i] = rng.binomial(1, weighted_mean)
+                col[row_idx] = rng.binomial(1, weighted_mean)
             elif strategy == "mean":
                 # 连续加权均值
-                col[i] = weighted_mean
+                col[row_idx] = weighted_mean
             else:
                 raise ValueError(f"Unknown strategy: {strategy}")
         return col
@@ -358,7 +446,7 @@ def _fill_knn_hamming_adaptive(X: pd.DataFrame, n_neighbors: int = 5, fallback: 
     else:
         # 串行模式：逐列依次执行填补
         # 仅在该列存在 NaN 时才调用填补函数，避免不必要的计算
-        for j in range(n_features):
+        for j in tqdm(range(n_features), desc="Filling columns", ncols=100):
             if X.iloc[:, j].isna().any():
                 X_tmp[:, j] = _process_column(j)
 
@@ -475,7 +563,7 @@ def _fill_knn_hamming_balltree(X: pd.DataFrame, n_neighbors: int = 5, fallback: 
     else:
         # 串行执行模式（单线程）
         # 遍历每一列，仅在存在 NaN 时才调用填补函数
-        for j in range(n_features):
+        for j in tqdm(range(n_features), desc="Filling columns", ncols=100):
             if X.iloc[:, j].isna().any():
                 X_tmp[:, j] = _process_column(j)
 
@@ -486,79 +574,116 @@ def _fill_knn_hamming_balltree(X: pd.DataFrame, n_neighbors: int = 5, fallback: 
     return X_filled
 
 
-def _fill_knn_faiss(X: pd.DataFrame, n_neighbors: int = 5, n_components: int = 50, fallback: float = 1.0, strategy: str = "mode", random_state: int | None = 42) -> pd.DataFrame:
+def _fill_knn_faiss(
+    X: pd.DataFrame,
+    n_neighbors: int = 5,
+    n_components: int = 50,
+    fallback: float = 1.0,
+    strategy: str = "mode",
+    random_state: int | None = 42,
+    batch_size: int = 2000,
+) -> pd.DataFrame:
     """
-    PCA + Faiss 近似 KNN 填补（超大规模版）（暂未验证）
-    ===================================================
-    适用于超大样本（>10,000），通过 PCA 降维
-    后使用 Faiss 加速最近邻搜索。
-    （暂未验证）
+    PCA + Faiss 近似 KNN 填补（增强版，支持 IncrementalPCA）
+    ==============================================================
+    适用于大规模基因型矩阵（>10k 样本），
+    在 PCA 阶段自动选择普通 PCA 或 IncrementalPCA，
+    并使用 Faiss 加速最近邻搜索（CPU/GPU 均可）。
 
     :param X: pd.DataFrame
-        基因型矩阵（值 ∈ {0,1,NaN}）。
+        基因型矩阵 (rows = samples, cols = SNPs; values ∈ {0, 1, NaN})
     :param n_neighbors: int
-        近邻数量。
-    :param n_components: int, default=50
-        PCA 降维维数。
+        KNN 近邻数量。
+    :param n_components: int
+        降维后的维度数。
     :param fallback: float
-        若邻居均缺失时使用该值。
+        当所有邻居均缺失时使用的回退值。
     :param strategy: str
-        填补策略："mode"/"mean"/"round"。
+        填补策略："mode" | "mean" | "round"。
     :param random_state: int | None
         随机种子。
+    :param batch_size: int
+        IncrementalPCA 的每批样本数。
     :return: pd.DataFrame
-        填补后的矩阵。
-
-    特性说明:
-        - 支持 GPU / CPU 加速；
-        - 可处理十万级样本；
-        - 精度略低但速度极快。
+        填补后的 DataFrame。
     """
     try:
-        import faiss  # type: ignore
+        import faiss
     except ImportError:
         raise ImportError("Faiss 未安装，请运行: pip install faiss-cpu 或 faiss-gpu")
 
-    X = X.copy()
-    X_tmp = X.fillna(X.mean())
-    print(f"[INFO] PCA降维至 {n_components} 维...")
-    Z = PCA(n_components=n_components, random_state=random_state).fit_transform(X_tmp)
+    n_samples, n_features = X.shape
+    est_gb = n_samples * n_features * 4 / (1024 ** 3)
+    avail_gb = psutil.virtual_memory().available / (1024 ** 3)
+    print(f"[INFO] PCA+Faiss (safe) | shape={n_samples}×{n_features}, est_mem≈{est_gb:.1f} GB, avail={avail_gb:.1f} GB")
 
-    print("[INFO] 构建 Faiss 索引...")
+    # === Step 1. 填补临时缺失值 (先用列均值代替 NaN，用于 PCA) ===
+    X_filled = X.fillna(X.mean())
+
+    # 自动选择 PCA 版本
+    if n_samples > 5000:
+        print(f"[INFO] 使用 IncrementalPCA(batch_size={batch_size}) 防止内存爆炸")
+        pca = IncrementalPCA(n_components=min(n_components, n_samples - 1), batch_size=batch_size)
+    else:
+        pca = PCA(n_components=min(n_components, n_samples - 1), random_state=random_state)
+
+    # 执行 PCA 降维
+    try:
+        Z = pca.fit_transform(X_filled.values)
+    except Exception as e:
+        print(f"[WARN] PCA 失败 ({e})，改用众数填补。")
+        return _fill_mode(X, fallback=fallback)
+
+    # 构建 CPU 版 Faiss 索引
+    print("[INFO] 构建 CPU 版 Faiss 索引 ...")
     index = faiss.IndexFlatL2(Z.shape[1])
-    index.add(Z.astype("float32"))  # type: ignore[attr-defined]
-    D, I = index.search(Z.astype("float32"), n_neighbors + 1)  # type: ignore[attr-defined]
-    I = I[:, 1:]
+    index.add(Z.astype("float32"))
+    D, I = index.search(Z.astype("float32"), n_neighbors + 1)
+    I = I[:, 1:]  # 去掉自身
 
-    for i in range(X.shape[0]):
-        nan_cols = np.where(X.iloc[i].isna())[0]
-        for j in nan_cols:
-            vals = X.iloc[I[i], j].dropna()
-            if vals.empty:
-                X.iat[i, j] = fallback
-                continue
-            if strategy == "mode":
-                X.iat[i, j] = vals.mode().iat[0]
+    # 逐样本填补（单线程，稳定不崩）
+    X_np = X.values.copy()
+    nan_mask = np.isnan(X_np)
+    print(f"[INFO] 开始填补 (strategy={strategy}, fallback={fallback})")
+
+    for i in tqdm(range(X_np.shape[0]), desc="FAISS filling", ncols=100):
+        missing_cols = np.where(nan_mask[i])[0]
+        if missing_cols.size == 0:
+            continue
+        neigh_idx = I[i]
+        for j in missing_cols:
+            vals = X_np[neigh_idx, j]
+            vals = vals[~np.isnan(vals)]
+            if vals.size == 0:
+                X_np[i, j] = fallback
+            elif strategy == "mode":
+                v, c = np.unique(vals, return_counts=True)
+                X_np[i, j] = v[np.argmax(c)]
             elif strategy == "mean":
-                X.iat[i, j] = vals.mean()
+                X_np[i, j] = np.nanmean(vals)
             elif strategy == "round":
-                X.iat[i, j] = round(vals.mean())
-    print(f"[OK] PCA+Faiss KNN complete — k={n_neighbors}, dim={n_components}, strategy={strategy}")
-    return X
+                X_np[i, j] = np.round(np.nanmean(vals))
+        if i % 500 == 0:
+            print(f"  [Progress] {i}/{n_samples} samples")
+
+    print(f"[OK] PCA+Faiss(SAFE) 填补完成 — k={n_neighbors}, dim={pca.n_components_}")
+    return pd.DataFrame(X_np, index=X.index, columns=X.columns)
 
 
-def _fill_knn_auto(X: pd.DataFrame, n_neighbors: int = 5, fallback: float = 1.0, missing_threshold: float = 0.3, random_state: int | None = None, verbose: bool = True) -> pd.DataFrame:
+
+def _fill_knn_auto(X: pd.DataFrame, n_neighbors: int = 5, fallback: float = 1.0, missing_threshold: float = 0.4, random_state: int | None = None, verbose: bool = True) -> pd.DataFrame:
     """
     自动选择最优 KNN 填补算法（Auto-select）
     ===================================================
     根据样本规模与缺失率自动选择最佳策略。
 
     策略逻辑：
-        - 高缺失率 ≥ 30%          → Adaptive Hamming (prob)
-        - 小样本 (< 500)           → Hamming(abs)
-        - 中等规模 (500 ≤ n ≤ 5000) → BallTree
-        - 大规模 (5000 < n ≤ 10000) → Adaptive Weighted Hamming
-        - 特大规模 (> 10000)        → PCA + Faiss
+        1. 内存估算 > 20 GB → 众数填补 (mode)
+        2. 缺失率 ≥ 40% → Adaptive Hamming (prob)
+        3. n < 500 → Hamming(abs)
+        4. 500 ≤ n ≤ 5000 → BallTree 并行 KNN
+        5. 5000 < n ≤ 10000 → Adaptive Weighted Hamming
+        6. n > 10000 → PCA + Faiss (自动切换 IncrementalPCA)
 
     :param X: pd.DataFrame
         基因型矩阵。
@@ -567,7 +692,7 @@ def _fill_knn_auto(X: pd.DataFrame, n_neighbors: int = 5, fallback: float = 1.0,
     :param fallback: float
         回退值。
     :param missing_threshold: float
-        缺失率阈值（默认 0.3）。
+        缺失率阈值（默认 0.4）。
     :param random_state: int | None
         随机种子。
     :param verbose: bool
@@ -579,12 +704,17 @@ def _fill_knn_auto(X: pd.DataFrame, n_neighbors: int = 5, fallback: float = 1.0,
     # === 基础信息 ===
     n_samples, n_features = X.shape
     missing_rate = X.isna().mean().mean()
+    est_size_gb = n_samples * n_features * 4 / (1024**3)  # 估算 float32 内存大小
 
     if verbose:
-        print(f"[INFO] Data shape: {n_samples}×{n_features} | Missing rate={missing_rate:.2%}")
+        print(f"[INFO] Data shape: {n_samples}×{n_features} | Missing rate={missing_rate:.2%} | Est. size={est_size_gb:.1f} GB")
 
+    # ===  极大矩阵 — 仅保留简单众数填补 ===
+    if est_size_gb > 20:
+        print("[AUTO] Extremely large dataset (>20 GB est.) — using MODE (column-wise majority) imputation.")
+        return _fill_mode(X, fallback=fallback)
 
-    # === 1. 高缺失率优先：使用自适应概率模式 ===
+    # ===  高缺失率（>30%） — 概率自适应 Hamming ===
     if missing_rate >= missing_threshold:
         if verbose:
             print("[AUTO] High missingness detected — using Adaptive Hamming (probabilistic mode).")
@@ -597,18 +727,22 @@ def _fill_knn_auto(X: pd.DataFrame, n_neighbors: int = 5, fallback: float = 1.0,
             random_state=random_state,
         )
 
-    # === 2. 小样本 ===
+    # ===  小样本 — Hamming(abs) 精确等权 ===
     if n_samples < 500:
         if verbose:
             print("[AUTO] Small dataset detected — using Hamming(abs) (equal-weight mode).")
         return _fill_knn_hamming_abs(
-            X, n_neighbors=n_neighbors, fallback=fallback, strategy="mode"
+            X,
+            n_neighbors=n_neighbors,
+            fallback=fallback,
+            strategy="mode",
+            random_state=random_state,
         )
 
-    # === 3. 中等规模 ===
+    # ===  中等规模 — BallTree 并行版本 ===
     elif n_samples <= 5000:
         if verbose:
-            print("[AUTO] Medium dataset — using BallTree-fast Hamming KNN (parallel optimized).")
+            print("[AUTO] Medium dataset — using BallTree-fast Hamming KNN.")
         return _fill_knn_hamming_balltree(
             X,
             n_neighbors=n_neighbors,
@@ -617,10 +751,10 @@ def _fill_knn_auto(X: pd.DataFrame, n_neighbors: int = 5, fallback: float = 1.0,
             parallel=True,
         )
 
-    # === 4.大规模 ===
+    # ===  大规模 — 自适应加权 Hamming KNN ===
     elif n_samples <= 10000:
         if verbose:
-            print("[AUTO] Large dataset — using Adaptive Weighted Hamming KNN (weighted decay).")
+            print("[AUTO] Large dataset — using Adaptive Weighted Hamming KNN.")
         return _fill_knn_hamming_adaptive(
             X,
             n_neighbors=n_neighbors,
@@ -630,10 +764,10 @@ def _fill_knn_auto(X: pd.DataFrame, n_neighbors: int = 5, fallback: float = 1.0,
             random_state=random_state,
         )
 
-    # === 5. 特大规模 ===
+    # ===  超大规模 — 使用 PCA + Faiss（自动切换 IncrementalPCA） ===
     else:
         if verbose:
-            print("[AUTO] Very large dataset — trying PCA + Faiss approximate KNN.")
+            print("[AUTO] Very large dataset — trying PCA + Faiss approximate KNN with IncrementalPCA fallback.")
         try:
             return _fill_knn_faiss(
                 X,
@@ -643,17 +777,9 @@ def _fill_knn_auto(X: pd.DataFrame, n_neighbors: int = 5, fallback: float = 1.0,
                 strategy="mode",
                 random_state=random_state,
             )
-        except ImportError:
-            print("[WARN] Faiss not installed — fallback to Adaptive Weighted Hamming.")
-            return _fill_knn_hamming_adaptive(
-                X,
-                n_neighbors=n_neighbors,
-                fallback=fallback,
-                target_decay=0.5,
-                strategy="mode",
-                random_state=random_state,
-            )
-
+        except Exception as e:
+            print(f"[WARN] Faiss KNN failed ({e}), falling back to MODE imputation.")
+            return _fill_mode(X, fallback=fallback)
 
 def impute_missing(X: pd.DataFrame, method: str = "mode", n_neighbors: int = 5) -> pd.DataFrame:
     """
@@ -684,7 +810,20 @@ def impute_missing(X: pd.DataFrame, method: str = "mode", n_neighbors: int = 5) 
     method = method.lower()
 
     # 将编码3替换为NaN以便填补
-    Z = X.replace(3, np.nan)
+    Z = X.astype("float32", copy=True)
+
+    # 分块处理，避免生成巨大布尔矩阵
+    block_size = 2000  # 每次处理2000列，可根据内存调整
+    n_cols = Z.shape[1]
+
+    print(f"[INFO] Replacing missing value (3 → NaN) in {n_cols} columns (batch size = {block_size})")
+
+    for start in tqdm(range(0, Z.shape[1], block_size), desc="3→NaN replace", ncols=100):
+        end = min(start + block_size, n_cols)
+        block = Z.iloc[:, start:end].to_numpy()
+        block[block == 3] = np.nan
+        Z.iloc[:, start:end] = block
+
     before_nans = Z.isna().sum().sum()
 
     if method == "mode":
@@ -714,3 +853,52 @@ def impute_missing(X: pd.DataFrame, method: str = "mode", n_neighbors: int = 5) 
     print(f"[OK] {method.upper():<5} 填补完成 | 替换缺失值数: {replaced} | 残留 NaN: {after_nans}")
 
     return filled
+
+
+def grouped_imputation(X, labels, method: str = "mode"):
+    """
+    按外部标签分组执行缺失值填补（封装版）
+    ===================================================
+    :param X: pd.DataFrame
+        原始基因型矩阵。
+    :param labels: pd.Series or None
+        外部标签列（例如 World Zone / Y haplogroup）。
+        若为 None，则执行全局填补。
+    :param method: str
+        填补方法，如 "mode"、"knn_hamming_adaptive"。
+    :return: pd.DataFrame
+        分组填补后的矩阵。
+    """
+    if labels is None:
+        print(f"[INFO] Global imputation (no grouping label provided) ...")
+        return impute_missing(X, method=method)
+
+    group_col = labels.name
+    print(f"[INFO] Grouped imputation by external label '{group_col}' ...")
+
+    # 保证索引一致
+    labels = labels.reindex(X.index)
+    groups = list(labels.groupby(labels).groups.items())
+    filled_groups = []
+    MIN_GROUP_SIZE = 5  # 小于等于 5 个样本时跳过 KNN
+
+    for idx, (group_name, sample_idx) in enumerate(tqdm(groups, desc="Group filling progress", ncols=100, unit="group")):
+        sub_X = X.loc[sample_idx]
+        n = len(sub_X)
+        tqdm.write(f"[INFO] Filling group {idx+1}/{len(groups)}: '{group_name}' (n={n})")
+
+        # 如果样本太少，改用 mode 填补
+        if n <= 50 and method.startswith("knn_faiss"):
+            print(f"    [WARN] Group '{group_name}' too small (n={n}), switching to mode imputation.")
+            sub_X_filled = impute_missing(sub_X, method="mode")
+        elif n <= MIN_GROUP_SIZE and method.startswith("knn"):
+            print(f"    [WARN] Group '{group_name}' too small (n={n}), using 'mode' instead of {method}")
+            sub_X_filled = impute_missing(sub_X, method="mode")
+        else:
+            sub_X_filled = impute_missing(sub_X, method=method)
+
+        filled_groups.append(sub_X_filled)
+
+    X_filled = pd.concat(filled_groups).sort_index()
+    print(f"[OK] Grouped imputation completed for {len(filled_groups)} groups.")
+    return X_filled
