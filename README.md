@@ -51,6 +51,8 @@ ancient-dna-viz/
    └─ test_io.py
 ```
 
+### README暂未更新，上面的架构并不正确
+
 ### 安装我的库
 ```aiignore
 pip install -r requirements.txt
