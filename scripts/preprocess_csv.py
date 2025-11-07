@@ -58,6 +58,7 @@ def run_impute_reduce_pipeline(X, meta, impute_method, reduce_method, labels, pr
     # 1. 缺失值填补
     start_impute = time.time()
     Xi = adna.impute_missing(X, method=impute_method)
+    # Xi = adna.grouped_imputation(X, labels, method=impute_method)
     impute_elapsed = round(time.time() - start_impute, 3)
     print(f"[OK] Imputation ({impute_method}) completed in {impute_elapsed:.2f}s")
 
@@ -99,11 +100,9 @@ def run_impute_reduce_pipeline(X, meta, impute_method, reduce_method, labels, pr
         print("\n[INFO] Running hierarchical clustering analysis...")
 
         if auto_cluster:
-            best_k = 10
-
-            # best_k = adna.find_optimal_clusters(
-            #     Xi, linkage_method="ward", metric="euclidean", cluster_range=range(2, 10), plot=True
-            # )
+            best_k = adna.find_optimal_clusters(
+                Xi, linkage_method="average", metric="hamming", cluster_range=range(2, 10), plot=True
+            )
             print(f"[INFO] Using optimal cluster number: {best_k}")
         else:
             best_k = 10
@@ -209,7 +208,7 @@ def main():
     # === 4. 需要测试的组合 ===
     # impute_methods = ["mode", "mean", "knn","knn_hamming"]
     # reduce_methods = ["umap", "tsne", "mds", "isomap"]
-    impute_methods = ['knn_hamming_adaptive','knn_hamming_balltree']
+    impute_methods = ['mode','knn_auto','knn_faiss']
     reduce_methods = ["tsne"]
 
     runtime_records = []
