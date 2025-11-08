@@ -236,28 +236,48 @@ def compute_embeddings(X: pd.DataFrame, method: str = "umap", n_components: int 
     return embedding
 
 
-def streaming_umap_from_parquet(
-    dataset_dir: str | Path,
-    n_components: int = 2,
-    max_cols: int = 50000,
-    pca_dim: int = 50,
-    random_state: int = 42,
-) -> pd.DataFrame:
+def streaming_umap_from_parquet(dataset_dir: str | Path, n_components: int = 2, max_cols: int = 50000, pca_dim: int = 50, random_state: int = 42,) -> pd.DataFrame:
     """
     Streaming-like UMAP（伪流式降维）
-    ===========================================================
-    步骤：
-      1. 读取列索引元数据 columns_index.json；
-      2. 按每个分片的真实列加载；
-      3. 增量训练 IncrementalPCA；
-      4. 拼接 PCA 结果后执行 UMAP；
-      5. 返回二维嵌入坐标。
+    Streaming-like UMAP dimensionality reduction.
 
-    :param dataset_dir: 分片目录路径
-    :param n_components: UMAP 降维维数
-    :param max_cols: 每个分片最多读取的特征列
-    :param pca_dim: PCA 压缩维度
-    :param random_state: 随机种子
+    通过增量 PCA 与分片 Parquet 文件实现低内存占用的降维流程。
+    Combines IncrementalPCA and Parquet-shard streaming to perform
+    low-memory UMAP embedding for very large datasets.
+
+    :param dataset_dir: str | Path
+        分片目录路径（包含 columns_index.json）。
+        Directory containing Parquet shards and `columns_index.json`.
+
+    :param n_components: int, default=2
+        UMAP 降维维数。
+        Target UMAP dimensionality.
+
+    :param max_cols: int, default=50000
+        每个分片最多读取的列数。
+        Maximum number of columns to read per shard.
+
+    :param pca_dim: int, default=50
+        PCA 压缩维度。
+        Number of PCA components retained before UMAP.
+
+    :param random_state: int, default=42
+        随机种子。
+        Random seed.
+
+    :return: pd.DataFrame
+        最终降维结果。
+        Final embedding DataFrame.
+
+    说明 / Notes:
+        - 从 columns_index.json 加载列分片索引。
+          Loads shard metadata from `columns_index.json`.
+        - 使用 IncrementalPCA 实现逐分片拟合与转换，避免内存峰值。
+          Fits and transforms shards incrementally using IncrementalPCA to avoid memory spikes.
+        - 拼接所有分片的 PCA 输出后执行 UMAP 降维。
+          Concatenates reduced outputs from all shards before final UMAP embedding.
+        - 适合超大规模基因型矩阵的可视化与特征压缩任务。
+          Designed for extremely large genotype datasets where full in-memory UMAP is infeasible.
     """
     dataset_dir = Path(dataset_dir)
     meta_path = dataset_dir / "columns_index.json"
@@ -273,47 +293,49 @@ def streaming_umap_from_parquet(
 
     print(f"[STREAM-UMAP] Loaded column metadata for {len(col_index_meta)} shards")
 
-    # === Step 0.5: 构建全局列空间（master_cols） ===
-    master_cols = []
-    for meta in col_index_meta:
-        for c in meta["columns"]:
-            if c not in master_cols:
-                master_cols.append(c)
-            if len(master_cols) >= max_cols:
-                break
-        if len(master_cols) >= max_cols:
-            break
-    print(f"[INFO] Unified master column space: {len(master_cols)} features")
-
     # === Step 1: Incremental PCA 训练阶段 ===
     ipca = IncrementalPCA(n_components=pca_dim)
-    col_to_idx = {c: i for i, c in enumerate(master_cols)}
+    expected_features = None  # 第一次确定特征维度
+
     for meta in tqdm(col_index_meta, desc="[STREAM] Incremental PCA fitting"):
         part_path = dataset_dir / meta["part"]
-        cols = [c for c in meta["columns"] if c in master_cols]
+        cols = meta["columns"][:max_cols]
         table = pq.read_table(part_path, columns=cols)
         X = table.to_pandas().fillna(1.0)
+        X_np = X.to_numpy(dtype=np.float32)
 
-        arr = np.full((len(X), len(master_cols)), 1.0, dtype=np.float32)
-        for j, c in enumerate(cols):
-            arr[:, col_to_idx[c]] = X[c].to_numpy(dtype=np.float32)
-        ipca.partial_fit(arr)
+        # 第一次设定标准列数
+        if expected_features is None:
+            expected_features = X_np.shape[1]
+            print(f"[INFO] Reference feature size: {expected_features}")
+        elif X_np.shape[1] < expected_features:
+            # 若最后一个分片列较少，用 1.0 填补差值
+            pad_width = expected_features - X_np.shape[1]
+            X_np = np.pad(X_np, ((0, 0), (0, pad_width)), constant_values=1.0)
+
+        ipca.partial_fit(X_np)
 
     # === Step 2: PCA 转换阶段 ===
     partial_embeddings = []
     for meta in tqdm(col_index_meta, desc="[STREAM] Incremental PCA transform"):
         part_path = dataset_dir / meta["part"]
-        cols = [c for c in meta["columns"] if c in master_cols]
+        cols = meta["columns"][:max_cols]
         table = pq.read_table(part_path, columns=cols)
         X = table.to_pandas().fillna(1.0)
-        X = X.reindex(columns=master_cols, fill_value=1.0)
-        X_red = ipca.transform(X.to_numpy(dtype=np.float32))
+        X_np = X.to_numpy(dtype=np.float32)
+
+        # 若特征维度不足，补齐
+        if X_np.shape[1] < expected_features:
+            X_np = np.pad(X_np, ((0, 0), (0, expected_features - X_np.shape[1])), constant_values=1.0)
+
+        X_red = ipca.transform(X_np)
         partial_embeddings.append(X_red)
 
-    X_all = np.vstack(partial_embeddings)
+    # === Step 3: 拼接所有 PCA 结果 ===
+    X_all = np.hstack(partial_embeddings)
     print(f"[OK] Incremental PCA complete → {X_all.shape}")
 
-    # === Step 3: 在压缩后的数据上运行 UMAP ===
+    # === Step 4: UMAP 降维 ===
     print(f"[UMAP] Running final UMAP on compressed data...")
     umap_model = UMAP(
         n_neighbors=15,

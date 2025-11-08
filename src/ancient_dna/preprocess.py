@@ -54,27 +54,59 @@ warnings.filterwarnings("ignore", category=pd.errors.SettingWithCopyWarning)
 
 def align_by_id(ids: pd.Series, X: pd.DataFrame, meta: pd.DataFrame, id_col: str = "Genetic ID") -> Tuple[pd.DataFrame, pd.DataFrame]:
     """
-    按样本 ID 对齐基因型矩阵与注释表，仅保留两表共有的样本，并保证行顺序一致。
+    按样本 ID 对齐基因型矩阵与注释表，仅保留两表共有的样本，并保持行顺序一致。
+    Align genotype matrix and metadata table by sample ID,
+    keeping only the intersecting samples and preserving row order.
 
-    :param ids: 样本 ID 序列（与 X 的行一一对应）。
-    :param X: 基因型矩阵 (pd.DataFrame)，行=样本，列=SNP。
-    :param meta: 注释表 (pd.DataFrame)，包含样本 ID 以及标签信息（如 Y haplogroup）。
-    :param id_col: 注释表中的样本 ID 列名（默认 "Genetic ID"）。
+    :param ids: pd.Series
+        样本 ID 序列（与 X 的行一一对应）。
+        Series of sample IDs (aligned with rows of X).
+
+    :param X: pd.DataFrame
+        基因型矩阵（行=样本，列=SNP）。
+        Genotype matrix (rows = samples, columns = SNPs).
+
+    :param meta: pd.DataFrame
+        样本注释表，包含样本 ID 以及标签信息（如 Y haplogroup）。
+        Metadata table containing sample IDs and associated attributes (e.g., Y haplogroup).
+
+    :param id_col: str, default="Genetic ID"
+        注释表中的样本 ID 列名（默认 "Genetic ID"）。
+        Column name of the sample ID in the metadata table (default: "Genetic ID").
+
     :return: (X_aligned, meta_aligned)
-             - X_aligned: 仅保留共有样本后的基因型矩阵（重新从 0 开始索引）。
-             - meta_aligned: 与 X_aligned 行顺序一致的注释表。
-    注意:
-        - 若注释表中缺失某些样本，将被自动丢弃；仅保留交集。
-    """
-    print("[INFO] Align by ID:")
-    ids_unique = ids.drop_duplicates().reset_index(drop=True)
-    meta_ids = meta[id_col].drop_duplicates()
-    common_ids = ids_unique[ids_unique.isin(meta_ids)]
+        - X_aligned: 对齐后的基因型矩阵，仅保留共有样本，索引从 0 重新开始。
+          Aligned genotype matrix with only intersecting samples, reindex from 0.
+        - meta_aligned: 与 X_aligned 行顺序完全一致的注释表。
+          Metadata table aligned in the same row order as X_aligned.
 
-    mask = ids.isin(common_ids)
-    X_aligned = X.loc[mask].reset_index(drop=True)
+    说明 / Notes:
+        - 若注释表中缺失某些样本，将被自动丢弃，仅保留交集。
+        - If some samples in metadata are missing, they are automatically discarded — only the intersection is kept.
+    """
+    print("[INFO] Aligning genotype matrix and metadata by sample ID...")
+
+    # === Step 1: 统一类型，防止类型不匹配 ===
+    ids = ids.astype(str)
+    meta_ids = meta[id_col].astype(str)
+
+    # === Step 2: 计算交集 ===
+    common_ids = pd.Index(ids).intersection(meta_ids)
+    if len(common_ids) == 0:
+        raise ValueError("[ERROR] No overlapping sample IDs between X and metadata.")
+
+    # === Step 3: 按交集保留样本并保持顺序 ===
+    X_aligned = X.loc[ids.isin(common_ids)].reset_index(drop=True)
     meta_aligned = meta.set_index(id_col).loc[common_ids].reset_index()
-    print(f"[OK] 共 {len(common_ids)} 个样本在两表中匹配 ({len(ids)}→{len(common_ids)})")
+
+    print(f"[OK] Matched {len(common_ids)} samples (from {len(ids)} → {len(common_ids)}).")
+
+    # === Step 4: 一致性检查 ===
+    if len(X_aligned) != len(meta_aligned):
+        print(f"[WARN] Row count mismatch after alignment: X={len(X_aligned)} vs meta={len(meta_aligned)}")
+    else:
+        print("[CHECK] Alignment successful. Row counts match exactly.")
+
     return X_aligned, meta_aligned
 
 
@@ -284,17 +316,19 @@ def _fill_mode(Z: pd.DataFrame, fallback: float = 1, save_disk: bool = True) -> 
 
         # 填补并写入 Parquet 文件
         block_filled = block.fillna(value=mode_map)
+        block_filled.index = block_filled.index.astype(str)
         part_path = shard_dir / f"part_{part_id:03d}.parquet"
-        table = pa.Table.from_pandas(block_filled.astype("float32"), preserve_index=False)
+        # noinspection PyArgumentList
+        table = pa.Table.from_pandas(df=block_filled.astype("float32"), preserve_index=False)
         pq.write_table(table, part_path, compression="zstd")
 
-        # === 记录列信息到索引 ===
+    #     # === 记录列信息到索引 ===
         col_index_meta.append({
             "part": f"part_{part_id:03d}.parquet",
             "columns": block.columns.tolist()
         })
 
-    # === 保存列索引元数据 ===
+    # # === 保存列索引元数据 ===
     meta_path = shard_dir / "columns_index.json"
     with open(meta_path, "w", encoding="utf-8") as f:
         json.dump(col_index_meta, f, ensure_ascii=False, indent=2)
