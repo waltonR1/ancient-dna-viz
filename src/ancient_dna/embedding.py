@@ -1,3 +1,41 @@
+"""
+embedding.py
+-----------------
+降维与嵌入模块（Embedding Layer）
+Dimensionality reduction and embedding module.
+
+用于将高维基因型矩阵投影到低维空间（2D 或 3D），
+以便进行可视化与聚类分析。
+支持多种主流降维算法（UMAP、t-SNE、MDS、Isomap），
+并提供基于增量 PCA 与 Parquet 分片的伪流式 UMAP 降维实现。
+Used for projecting high-dimensional genotype matrices into lower-dimensional spaces (2D or 3D)
+for visualization and clustering analysis.
+Supports multiple mainstream embedding algorithms (UMAP, t-SNE, MDS, Isomap)
+and includes a streaming-like UMAP implementation using incremental PCA and Parquet shards.
+
+功能 / Functions:
+    - _compute_umap(): 执行 UMAP 降维。
+      Perform UMAP dimensionality reduction.
+    - _compute_tsne(): 执行 t-SNE 降维。
+      Perform t-SNE dimensionality reduction.
+    - _compute_mds(): 执行 MDS 降维。
+      Perform MDS dimensionality reduction.
+    - _compute_isomap(): 执行 Isomap 降维。
+      Perform Isomap manifold embedding.
+    - compute_embeddings(): 降维统一接口，根据 method 自动调度。
+      Unified interface that dispatches to the chosen reduction algorithm.
+    - streaming_umap_from_parquet(): 流式 UMAP 降维，适用于大规模数据集。
+      Streaming-like UMAP with incremental PCA for large datasets.
+
+说明 / Description:
+    本模块是整个管线的“嵌入层”（Embedding Layer），
+    负责将高维基因型矩阵压缩为可解释的低维空间表示。
+    输出结果与样本顺序完全一致，适用于后续聚类或可视化。
+    This module serves as the embedding layer of the pipeline,
+    transforming high-dimensional genotype matrices into interpretable lower-dimensional spaces.
+    Output coordinates maintain exact sample ordering for downstream clustering and visualization.
+"""
+
 from pathlib import Path
 import pandas as pd
 from sklearn.manifold import TSNE, MDS, Isomap
@@ -10,16 +48,32 @@ import pyarrow.parquet as pq
 
 def _compute_umap(X: pd.DataFrame, n_components: int = 2, **kwargs) -> pd.DataFrame:
     """
-    UMAP 降维。
+    执行 UMAP 降维
+    Perform UMAP dimensionality reduction.
 
-    :param X: 基因型矩阵 (pd.DataFrame)，行=样本，列=SNP。
-    :param n_components: 降维目标维度（默认 2）。
-    :param kwargs: 传递给 UMAP 的额外参数。
-    :return: 降维结果 DataFrame，列名为 ["Dim1", "Dim2", ...]。
-    说明:
-        - 支持 random_state；
-        - 适合保持全局结构与局部簇结构；
-        - 输出结构与样本顺序保持一致。
+    :param X: pd.DataFrame
+        基因型矩阵（行 = 样本，列 = SNP）。
+        Genotype matrix (rows = samples, columns = SNPs).
+
+    :param n_components: int, default=2
+        降维目标维度。
+        Target number of dimensions.
+
+    :param kwargs: dict
+        传递给 UMAP 的额外参数（如 random_state, metric 等）。
+        Additional arguments passed to the UMAP constructor.
+
+    :return: pd.DataFrame
+        降维结果 DataFrame，列名为 ["Dim1", "Dim2", ...]。
+        Reduced DataFrame with columns ["Dim1", "Dim2", ...].
+
+    说明 / Notes:
+        - 支持 random_state 参数以保证可重复性。
+          Supports `random_state` for reproducibility.
+        - 能较好地保留全局与局部簇结构。
+          Preserves both global and local cluster structures.
+        - 输出顺序与输入样本一致。
+          Output sample order is identical to input.
     """
     model = UMAP(n_components=n_components, **kwargs)
     coords = model.fit_transform(X.fillna(0))
@@ -28,16 +82,32 @@ def _compute_umap(X: pd.DataFrame, n_components: int = 2, **kwargs) -> pd.DataFr
 
 def _compute_tsne(X: pd.DataFrame, n_components: int = 2, **kwargs) -> pd.DataFrame:
     """
-    t-SNE 降维。
+    执行 t-SNE 降维
+    Perform t-SNE dimensionality reduction.
 
-    :param X: 基因型矩阵 (pd.DataFrame)。
-    :param n_components: 降维目标维度（默认 2）。
-    :param kwargs: 传递给 TSNE 的额外参数。
-    :return: 降维结果 DataFrame。
-    说明:
-        - 支持 random_state；
-        - 仅支持欧氏距离；
-        - 适合局部结构可视化。
+    :param X: pd.DataFrame
+        基因型矩阵。
+        Genotype matrix.
+
+    :param n_components: int, default=2
+        降维目标维度。
+        Target number of dimensions.
+
+    :param kwargs: dict
+        传递给 TSNE 的额外参数。
+        Additional parameters passed to TSNE.
+
+    :return: pd.DataFrame
+        降维结果 DataFrame。
+        DataFrame containing reduced coordinates.
+
+    说明 / Notes:
+        - 支持 random_state。
+          Supports `random_state`.
+        - 使用欧氏距离，适合局部结构可视化。
+          Uses Euclidean distance; suitable for local structure visualization.
+        - 计算复杂度较高，不推荐超大数据集使用。
+          Computationally expensive; not ideal for very large datasets.
     """
     model = TSNE(n_components=n_components, **kwargs)
     coords = model.fit_transform(X.fillna(0))
@@ -46,16 +116,32 @@ def _compute_tsne(X: pd.DataFrame, n_components: int = 2, **kwargs) -> pd.DataFr
 
 def _compute_mds(X: pd.DataFrame, n_components: int = 2, **kwargs) -> pd.DataFrame:
     """
-    MDS 降维。
+    执行 MDS 降维
+    Perform MDS dimensionality reduction.
 
-    :param X: 基因型矩阵 (pd.DataFrame)。
-    :param n_components: 降维目标维度（默认 2）。
-    :param kwargs: 传递给 MDS 的额外参数。
-    :return: 降维结果 DataFrame。
-    说明:
-        - 不支持 random_state；
-        - 适合线性结构可视化；
+    :param X: pd.DataFrame
+        基因型矩阵。
+        Genotype matrix.
+
+    :param n_components: int, default=2
+        降维目标维度。
+        Target number of dimensions.
+
+    :param kwargs: dict
+        传递给 MDS 的额外参数。
+        Additional parameters passed to MDS.
+
+    :return: pd.DataFrame
+        降维结果 DataFrame。
+        Reduced DataFrame.
+
+    说明 / Notes:
+        - 不支持 random_state。
+          Does not support `random_state`.
+        - 适合线性结构可视化。
+          Suitable for linear-structure visualization.
         - 计算复杂度较高。
+          Computationally intensive.
     """
     kwargs.pop("random_state", None)
     model = MDS(n_components=n_components, **kwargs)
@@ -65,16 +151,30 @@ def _compute_mds(X: pd.DataFrame, n_components: int = 2, **kwargs) -> pd.DataFra
 
 def _compute_isomap(X: pd.DataFrame, n_components: int = 2, **kwargs) -> pd.DataFrame:
     """
-    Isomap 降维。
+    执行 Isomap 降维
+    Perform Isomap manifold embedding.
 
-    :param X: 基因型矩阵 (pd.DataFrame)。
-    :param n_components: 降维目标维度（默认 2）。
-    :param kwargs: 传递给 Isomap 的额外参数。
-    :return: 降维结果 DataFrame。
-    说明:
-        - 不支持 random_state；
-        - 适合流形学习任务；
-        - 保留非线性结构的全局嵌入。
+    :param X: pd.DataFrame
+        基因型矩阵。
+        Genotype matrix.
+
+    :param n_components: int, default=2
+        降维目标维度。
+        Target number of dimensions.
+
+    :param kwargs: dict
+        传递给 Isomap 的额外参数。
+        Additional parameters passed to Isomap.
+
+    :return: pd.DataFrame
+        降维结果 DataFrame。
+        Reduced DataFrame.
+
+    说明 / Notes:
+        - 不支持 random_state。
+          Does not support `random_state`.
+        - 适合非线性流形结构的学习与可视化。
+          Preserves global manifold structure for nonlinear embeddings.
     """
     kwargs.pop("random_state", None)
     model = Isomap(n_components=n_components, **kwargs)
@@ -84,17 +184,39 @@ def _compute_isomap(X: pd.DataFrame, n_components: int = 2, **kwargs) -> pd.Data
 
 def compute_embeddings(X: pd.DataFrame, method: str = "umap", n_components: int = 2, **kwargs) -> pd.DataFrame:
     """
-    降维统一接口。
+    降维统一接口
+    Unified interface for dimensionality reduction.
 
-    :param X: 基因型矩阵 (pd.DataFrame)，行=样本，列=SNP。
-    :param method: 降维方法（"umap" / "tsne" / "mds" / "isomap"）。
-    :param n_components: 目标维度（2 或 3），默认 2。
-    :param kwargs: 传递给具体算法的额外参数。
-    :return: 投影后的 DataFrame。
-    说明:
-        - 自动根据 method 调用对应算法；
-        - 输出列名为 ["Dim1", "Dim2", ...]；
-        - 若算法不支持 random_state，会自动忽略。
+    根据指定 method 自动选择对应算法执行降维。
+    Automatically dispatches to the chosen embedding algorithm.
+
+    :param X: pd.DataFrame
+        基因型矩阵。
+        Genotype matrix.
+
+    :param method: str, default="umap"
+        降维方法（"umap"、"tsne"、"mds"、"isomap"）。
+        Embedding method ("umap", "tsne", "mds", "isomap").
+
+    :param n_components: int, default=2
+        目标维度（2 或 3）。
+        Target number of dimensions (2 or 3).
+
+    :param kwargs: dict
+        传递给具体算法的额外参数。
+        Extra parameters passed to the underlying algorithm.
+
+    :return: pd.DataFrame
+        投影后的 DataFrame。
+        Projected DataFrame.
+
+    说明 / Notes:
+        - 根据 method 自动调用相应算法。
+          Automatically dispatches to the proper method.
+        - 输出列名统一为 ["Dim1", "Dim2", ...]。
+          Output columns standardized as ["Dim1", "Dim2", ...].
+        - 对不支持 random_state 的算法自动忽略该参数。
+          Random state parameter is ignored for unsupported methods.
     """
     print(f"[INFO] Compute embeddings with method: {method}")
     method = method.lower()

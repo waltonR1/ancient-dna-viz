@@ -1,7 +1,32 @@
 """
 inspect_ancestrymap.py
-轻量查看 AncestryMap / EIGENSTRAT 格式数据集 (.geno / .snp / .ind / .anno)
-兼容二进制和文本格式的 .geno 文件，自动检测并读取。
+-----------------
+数据集检查模块（Data Inspection Layer）
+Lightweight inspection tool for AncestryMap / EIGENSTRAT datasets (.geno / .snp / .ind / .anno).
+
+用于快速查看并验证遗传数据集的结构与内容，
+兼容二进制与文本格式的 .geno 文件，自动检测并解码。
+Provides a quick inspection interface for dataset integrity checking,
+automatically detects and decodes both binary and text-based .geno formats.
+
+功能 / Functions:
+    - inspect_geno(): 检查 GENO 文件结构与格式（自动识别文本/二进制）
+      Inspect GENO file structure and format (auto-detect text/binary).
+    - inspect_snp(): 解析 SNP 文件并显示染色体与位点统计。
+      Parse SNP file and show chromosome/variant summaries.
+    - inspect_ind(): 读取 IND 文件并显示性别与种群分布。
+      Read IND file and summarize sex/population distribution.
+    - inspect_anno(): 检查 ANNO 文件结构与列信息。
+      Inspect ANNO annotation file and list column structure.
+    - main(): 主入口函数，批量检查所有数据文件。
+      Main entry point that runs all inspection steps sequentially.
+
+说明 / Description:
+    本模块属于数据处理流程的“检查层”（Inspection Layer），
+    用于在加载与分析前，验证 AncestryMap 格式数据集的完整性与可读性。
+    This module serves as the inspection layer of the pipeline,
+    verifying the integrity and readability of AncestryMap-formatted datasets
+    before preprocessing and downstream analysis.
 """
 
 from pathlib import Path
@@ -9,19 +34,33 @@ import pandas as pd
 from ancient_dna.genotopython import unpackfullgenofile
 
 
-# ======================
-# 辅助函数
-# ======================
 def print_sep(title: str):
+    """打印分隔标题 / Print section separator."""
     print("\n" + "=" * 25)
     print(f"=== {title}")
     print("=" * 25)
 
 
-# ======================
-# 1. GENO 文件
-# ======================
 def inspect_geno(geno_path: Path, max_lines: int = 5, max_cols: int = 100):
+    """
+    检查 GENO 文件（自动识别文本或二进制格式）
+    Inspect GENO file and auto-detect whether it's text or binary.
+
+    :param geno_path: Path
+        GENO 文件路径 / Path to .geno file.
+    :param max_lines: int
+        预览的最大行数 / Number of preview lines for text mode.
+    :param max_cols: int
+        每行预览的最大字符数 / Max number of characters displayed per line.
+
+    说明 / Notes:
+        - 自动检测文件类型：ASCII 文本或二进制格式。
+          Automatically detects whether file is text or binary encoded.
+        - 文本模式下统计 SNP 行数与字符分布。
+          Reports SNP rows and character frequencies for text mode.
+        - 二进制模式下调用 unpackfullgenofile() 进行解码。
+          Uses unpackfullgenofile() to decode binary .geno files.
+    """
     print_sep("GENO FILE")
     if not geno_path.exists():
         print(f"[WARN] {geno_path.name} not found.")
@@ -71,10 +110,22 @@ def inspect_geno(geno_path: Path, max_lines: int = 5, max_cols: int = 100):
         print(f"[ERROR] Could not decode binary GENO: {e}")
 
 
-# ======================
-# 2. SNP 文件
-# ======================
 def inspect_snp(snp_path: Path, n_rows: int = 5):
+    """
+    检查 SNP 文件
+    Inspect SNP file and summarize basic variant information.
+
+    :param snp_path: Path
+        SNP 文件路径 / Path to .snp file.
+    :param n_rows: int
+        预览行数 / Number of rows to preview.
+
+    说明 / Notes:
+        - 解析常见 6 列格式（SNP_ID, CHR, GEN_DIST, BP_POS, ALLELE1, ALLELE2）。
+          Reads standard 6-column EIGENSTRAT SNP file.
+        - 打印行数与染色体分布前十名。
+          Prints basic statistics and top chromosome counts.
+    """
     print_sep("SNP FILE")
     if not snp_path.exists():
         print(f"[WARN] {snp_path.name} not found.")
@@ -90,10 +141,22 @@ def inspect_snp(snp_path: Path, n_rows: int = 5):
     print(df["CHR"].value_counts().head(10))
 
 
-# ======================
-# 3. IND 文件
-# ======================
 def inspect_ind(ind_path: Path, n_rows: int = 10):
+    """
+    检查 IND 文件
+    Inspect IND file and summarize individuals' attributes.
+
+    :param ind_path: Path
+        IND 文件路径 / Path to .ind file.
+    :param n_rows: int
+        预览行数 / Number of rows to preview.
+
+    说明 / Notes:
+        - 读取标准三列格式（Individual, Sex, Population）。
+          Reads standard 3-column IND file.
+        - 统计性别比例与种群分布前十。
+          Displays sex ratio and top 10 population counts.
+    """
     print_sep("IND FILE")
     if not ind_path.exists():
         print(f"[WARN] {ind_path.name} not found.")
@@ -109,10 +172,24 @@ def inspect_ind(ind_path: Path, n_rows: int = 10):
     print(df["Population"].value_counts().head(10))
 
 
-# ======================
-# 4. ANNO 文件
-# ======================
 def inspect_anno(anno_path: Path, n_rows: int = 10):
+    """
+    检查 ANNO 文件
+    Inspect annotation (.anno) file.
+
+    :param anno_path: Path
+        注释文件路径 / Path to annotation file.
+    :param n_rows: int
+        预览行数 / Number of rows to preview.
+
+    说明 / Notes:
+        - 支持自动检测分隔符（Tab / Comma）。
+          Automatically detects separator (Tab or Comma).
+        - 打印列名与前几行数据预览。
+          Displays column names and top rows.
+        - 可用于检查样本标签与地理信息是否完整。
+          Useful for verifying metadata completeness.
+    """
     print_sep("ANNO FILE")
     if not anno_path.exists():
         print(f"[WARN] {anno_path.name} not found.")
@@ -129,10 +206,18 @@ def inspect_anno(anno_path: Path, n_rows: int = 10):
     print("\n[INFO] Columns:", list(df.columns))
 
 
-# ======================
-# 主入口
-# ======================
 def main():
+    """
+    主入口函数
+    Main entry point for dataset inspection.
+
+    自动执行对 .geno / .snp / .ind / .anno 文件的检测与报告。
+    Automatically performs inspection and summary of all data files.
+
+    :return: None
+        无返回值，直接打印检查结果。
+        None (prints results to console).
+    """
     ROOT = Path(__file__).resolve().parents[1] if __file__.endswith(".py") else Path.cwd()
     raw_dir = ROOT / "data" / "raw"
 

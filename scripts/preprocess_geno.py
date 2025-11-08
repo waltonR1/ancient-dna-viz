@@ -44,7 +44,6 @@ def main():
     sm, cm = adna.compute_missing_rates(X)
     Xf = adna.filter_by_missing(X, sm, cm)
     adna.save_report(adna.build_missing_report(sm, cm), results_dir / "missing_report_packed.csv")
-
     adna.plot_missing_values(Xf, save_path=results_dir / "Missing_after_filtering_packed.png")
 
     # === 3. 标签列 ===
@@ -91,7 +90,7 @@ def main():
 
                     # === 层次聚类分析 ===
                     print("\n[INFO] Running hierarchical clustering analysis...")
-                    best_k = adna.find_optimal_clusters(target_matrix, linkage_method="average",
+                    best_k, _ = adna.find_optimal_clusters(target_matrix, linkage_method="average",
                                                         metric="hamming", cluster_range=range(2, 9))
                     print(f"[INFO] Using optimal cluster number: {best_k}")
 

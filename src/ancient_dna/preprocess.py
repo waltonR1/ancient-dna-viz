@@ -1,3 +1,39 @@
+"""
+preprocess.py
+-----------------
+数据预处理（Preprocessing）模块
+Preprocessing module for genotype matrix cleaning, filtering, and imputation.
+
+用于执行基因型矩阵的缺失值检测、样本与注释表对齐、缺失率计算、过滤与填补。
+Used for performing missing-value analysis, alignment between genotype and metadata tables,
+and imputation using multiple optimized algorithms (mode, mean, KNN, BallTree, Faiss, etc.).
+
+功能：
+    - align_by_id(): 对齐基因型矩阵与样本注释表；
+    - compute_missing_rates(): 计算样本与SNP缺失率；
+    - filter_by_missing(): 按缺失率阈值过滤；
+    - impute_missing(): 通用缺失值填补入口；
+    - grouped_imputation(): 按标签分组填补；
+    - _fill_mode(), _fill_mean(), _fill_knn() 等: 各种填补方法实现。
+
+Functions:
+    - align_by_id(): Align genotype matrix with metadata table by sample IDs.
+    - compute_missing_rates(): Compute missing rate per sample and per SNP.
+    - filter_by_missing(): Filter samples and SNPs based on missing rate thresholds.
+    - impute_missing(): Unified imputation entrypoint.
+    - grouped_imputation(): Group-based imputation by external labels.
+    - _fill_mode(), _fill_mean(), _fill_knn(), etc.: Implement various imputation strategies.
+
+说明：
+    本模块是基因型数据管线的核心部分（Preprocessing Layer），
+    负责缺失值检测、数据过滤及多算法填补。
+    其输出结果直接供降维（embedding）、聚类（clustering）等模块使用。
+Description:
+    This module forms the preprocessing layer of the genotype data pipeline.
+    It handles missing-value detection, filtering, and imputation with multiple algorithms.
+    Its outputs are directly consumed by embedding and clustering components.
+"""
+
 import json
 import numpy as np
 import pandas as pd
@@ -44,15 +80,31 @@ def align_by_id(ids: pd.Series, X: pd.DataFrame, meta: pd.DataFrame, id_col: str
 
 def compute_missing_rates(X: pd.DataFrame) -> Tuple[pd.Series, pd.Series]:
     """
-    计算缺失率（样本维度 & SNP 维度）。
-        - 0 = 参考等位基因
-        - 1 = 变异等位基因
-        - 3 = 缺失
+    计算缺失率（样本维度 & SNP 维度）
+    Compute missing rates across both sample (row) and SNP (column) dimensions.
 
-    :param X: 基因型矩阵 (pd.DataFrame)。
+    编码说明 / Encoding legend:
+        - 0 = 参考等位基因 (reference allele)
+        - 1 = 变异等位基因 (alternate allele)
+        - 3 = 缺失值 (missing value)
+
+    :param X: pd.DataFrame
+        基因型矩阵（行 = 样本，列 = SNP）。
+        Genotype matrix (rows = samples, columns = SNPs).
+
     :return: (sample_missing, snp_missing)
-             - sample_missing: 每个样本（行）的缺失率 (0~1)。
-             - snp_missing: 每个 SNP（列）的缺失率 (0~1)。
+        - sample_missing: 每个样本（行）的缺失率 (0~1)。
+          Missing rate of each sample (row-level).
+        - snp_missing: 每个 SNP（列）的缺失率 (0~1)。
+          Missing rate of each SNP (column-level).
+
+    说明 / Notes:
+        - 本函数将编码值 3 替换为 NaN，用于统计缺失率；
+          The function replaces code value 3 with NaN for missing-value detection.
+        - 使用分块处理，避免一次性生成巨大布尔矩阵导致内存占用过高；
+          It processes data in column batches to prevent excessive memory usage.
+        - 输出包含两个 Series，分别表示样本维度与 SNP 维度的缺失比例。
+          Returns two Series objects: one for sample-level and one for SNP-level missing rates.
     """
     print("[INFO] Compute missing rate:")
     # 将编码 3 替换为 NaN 以便统计缺失率
@@ -83,13 +135,37 @@ def compute_missing_rates(X: pd.DataFrame) -> Tuple[pd.Series, pd.Series]:
 def filter_by_missing(X: pd.DataFrame, sample_missing: pd.Series, snp_missing: pd.Series, max_sample_missing: float = 0.8, max_snp_missing: float = 0.8) -> pd.DataFrame:
     """
     按缺失率阈值过滤样本与 SNP（默认阈值较宽松，可在后续调整）。
+    Filter samples and SNPs based on missing rate thresholds (default thresholds are lenient and can be adjusted later).
 
-    :param X: 基因型矩阵。
-    :param sample_missing: 每个样本的缺失率 (pd.Series)。
-    :param snp_missing: 每个 SNP 的缺失率 (pd.Series)。
-    :param max_sample_missing: 样本级最大缺失率阈值（默认 0.8）。
-    :param max_snp_missing: SNP 级最大缺失率阈值（默认 0.8）。
-    :return: 过滤后的矩阵 (pd.DataFrame)，索引从 0 重新开始。
+    :param X: pd.DataFrame
+        基因型矩阵。
+        Genotype matrix.
+
+    :param sample_missing: pd.Series
+        每个样本的缺失率。
+        Missing rate of each sample.
+
+    :param snp_missing: pd.Series
+        每个 SNP 的缺失率。
+        Missing rate of each SNP.
+
+    :param max_sample_missing: float, default=0.8
+        样本级最大缺失率阈值（默认 0.8）。
+        Maximum allowed missing rate per sample (default: 0.8).
+
+    :param max_snp_missing: float, default=0.8
+        SNP 级最大缺失率阈值（默认 0.8）。
+        Maximum allowed missing rate per SNP (default: 0.8).
+
+    :return: pd.DataFrame
+        过滤后的矩阵，索引从 0 重新开始。
+        Filtered matrix with reindexed rows starting from 0.
+
+    说明 / Notes:
+        - 超过指定缺失率阈值的样本和 SNP 将被剔除。
+          Samples or SNPs exceeding the defined thresholds will be removed.
+        - 若过滤结果为空矩阵，将抛出异常提醒用户调整阈值。
+          If the filtered matrix is empty, an exception will be raised to prompt threshold adjustment.
     """
     print("[INFO] Filter by missing rate:")
     keep_rows = sample_missing <= max_sample_missing
@@ -98,27 +174,52 @@ def filter_by_missing(X: pd.DataFrame, sample_missing: pd.Series, snp_missing: p
     print(f"[INFO] 样本: {keep_rows.sum()}/{len(X)} 保留, SNP: {len(keep_cols)}/{X.shape[1]} 保留")
 
     if X_filtered.empty:
-        raise ValueError("[ERROR] 过滤后矩阵为空，请调整阈值。")
+        raise ValueError("[ERROR] The filtered matrix is empty. Please adjust the threshold.")
 
     return X_filtered
 
 
 def _fill_mode(Z: pd.DataFrame, fallback: float = 1, save_disk: bool = True) -> pd.DataFrame:
     """
-    列众数填补（大规模优化版）
-    ===================================================
-    - 小规模数据：直接在内存中执行；
-    - 大规模数据：使用 NumPy memmap + PyArrow Parquet 边计算边落盘；
-    - 自动路径管理：中间文件保存在 data/processed，最终结果移动至 data/results。
+    列众数填补（自动内存检测与分片写入优化版）
+    Column-wise mode imputation with adaptive memory check and sharded Parquet output.
+
+    本函数根据数据规模与可用内存自动选择填补模式：
+    - 当数据规模较小或内存充足时，在内存中直接执行列众数填补；
+    - 当数据过大或内存不足时，采用分片（sharded）写入模式，将每批列结果写入 Parquet 文件；
+    - 所有中间与最终文件路径均自动管理：临时结果保存在 `data/processed`，最终输出保存在 `data/results`。
+    This function automatically chooses the optimal imputation mode:
+    - For small datasets or sufficient memory, imputation is performed entirely in-memory;
+    - For large datasets or limited memory, a sharded Parquet writing strategy is used to process column batches;
+    - Intermediate and final output directories are automatically handled (`data/processed` and `data/results`).
 
     :param Z: pd.DataFrame
-        基因型矩阵（行=样本，列=SNP）。
+        基因型矩阵（行 = 样本，列 = SNP）。
+        Genotype matrix (rows = samples, columns = SNPs).
+
     :param fallback: float
-        若整列均为空，则使用该值。
+        当整列均为空时使用的回退值。
+        Fallback value used when an entire column is empty.
+
     :param save_disk: bool, default=True
-        是否在超大规模数据时启用磁盘落盘模式。
+        是否在超大规模数据时启用磁盘写入模式。
+        Whether to enable on-disk mode for extremely large datasets.
+
     :return: pd.DataFrame
-        填补后的矩阵；若启用落盘模式则返回空 DataFrame（结果已保存为 Parquet）。
+        填补后的矩阵。若启用落盘模式，则返回空 DataFrame（结果已保存为 Parquet 文件）。
+        The imputed DataFrame; returns an empty DataFrame if on-disk mode is enabled (results saved as Parquet files).
+
+    说明 / Notes:
+        - 函数首先估算数据大小（行 × 列 × 4 字节）与系统可用内存，用于判断是否需落盘处理；
+          The function estimates dataset size (rows × columns × 4 bytes) and compares it to available system memory to decide whether disk mode is needed.
+        - 小规模数据使用字典暂存每列填补结果，并通过 `pd.concat()` 一次性拼接，避免碎片化；
+          For small datasets, each column is filled in memory using a dictionary and concatenated with `pd.concat()` to avoid fragmentation.
+        - 大规模数据则按列分片（每批约 2000 列）循环处理，并将结果以压缩格式写入 Parquet 文件；
+          For large datasets, columns are processed in shards (≈2000 columns per batch) and written as compressed Parquet files.
+        - 同时保存列索引元数据（JSON 文件）以便后续加载；
+          Column index metadata is also saved as a JSON file for later reconstruction.
+        - 若启用了磁盘模式，函数结束后会输出提示路径与加载方式。
+          When disk mode is active, the function logs the output directory and instructions for reloading results.
     """
     n_rows, n_cols = Z.shape
     est_size_gb = n_rows * n_cols * 4 / 1024**3
@@ -207,19 +308,27 @@ def _fill_mode(Z: pd.DataFrame, fallback: float = 1, save_disk: bool = True) -> 
 
 def _fill_mean(X: pd.DataFrame) -> pd.DataFrame:
     """
-    列均值填补（矢量化实现）。
-    ===================================================
-    使用每列均值替代缺失值，适合连续型数据。
+    列均值填补（矢量化实现）
+    Column-wise mean imputation (vectorized implementation).
+
+    使用每列的均值替代缺失值，适合连续型数值数据。
+    Replaces missing values (NaN) in each column with the column mean, suitable for continuous data.
 
     :param X: pd.DataFrame
-        基因型矩阵（行=样本，列=SNP）。
-    :return: pd.DataFrame
-        填补后的矩阵。
+        基因型矩阵（行 = 样本，列 = SNP）。
+        Genotype matrix (rows = samples, columns = SNPs).
 
-    说明:
-        - 对每列单独计算均值；
-        - 用 fillna() 替换 NaN；
-        - 输出与原矩阵列名一致。
+    :return: pd.DataFrame
+        填补后的矩阵，结构与原矩阵完全一致。
+        The imputed DataFrame with the same structure as the original.
+
+    说明 / Notes:
+        - 对每列单独计算均值，并用 `fillna()` 替换缺失值。
+          Computes the mean of each column and replaces NaN values using `fillna()`.
+        - 采用 Pandas 内部矢量化操作，无需循环，执行效率高且不会触发碎片警告。
+          Utilizes Pandas' internal vectorized operations — faster and avoids fragmentation warnings.
+        - 适用于连续数值型特征，不推荐用于类别型或离散型 SNP 编码数据。
+          Recommended for continuous numeric features; not ideal for categorical or discrete SNP-encoded data.
     """
     # pandas fillna 本身矢量化，不会触发碎片警告
     result = X.fillna(X.mean())
@@ -230,23 +339,35 @@ def _fill_mean(X: pd.DataFrame) -> pd.DataFrame:
 
 def _fill_knn(X: pd.DataFrame, n_neighbors: int = 5, metric: str = "nan_euclidean") -> pd.DataFrame:
     """
-    基于 sklearn 的 KNN 填补（Euclidean）
-    ===================================================
-    使用 KNNImputer，计算样本间欧氏距离（忽略 NaN）。
+    基于 sklearn 的 KNN 填补（欧氏距离）
+    KNN-based imputation using sklearn with Euclidean distance.
+
+    使用 `sklearn.impute.KNNImputer` 按样本间欧氏距离（忽略 NaN）进行缺失值填补。
+    Missing values are imputed using `sklearn.impute.KNNImputer`, which computes pairwise Euclidean distances while ignoring NaN values.
 
     :param X: pd.DataFrame
-        基因型矩阵。
-    :param n_neighbors: int, default=5
-        近邻数量。
-    :param metric: str, default="nan_euclidean"
-        距离度量方式。
-    :return: pd.DataFrame
-        填补后的矩阵。
+        基因型矩阵（行 = 样本，列 = SNP）。
+        Genotype matrix (rows = samples, columns = SNPs).
 
-    说明:
-        - 使用 sklearn.impute.KNNImputer；
-        - 自动忽略 NaN 计算距离；
-        - 大型数据集会自动提示性能警告。
+    :param n_neighbors: int, default=5
+        近邻数量，用于计算 KNN 填补。
+        Number of nearest neighbors used for imputation.
+
+    :param metric: str, default="nan_euclidean"
+        距离度量方式（默认忽略 NaN 的欧氏距离）。
+        Distance metric to use (default: Euclidean distance ignoring NaNs).
+
+    :return: pd.DataFrame
+        填补后的矩阵，结构与原矩阵一致。
+        The imputed DataFrame with the same structure as the input.
+
+    说明 / Notes:
+        - 使用 sklearn 内置的 `KNNImputer` 实现 KNN 填补。
+          Uses sklearn's built-in `KNNImputer` for KNN-based imputation.
+        - 在计算样本间距离时会自动忽略缺失值（NaN）。
+          Automatically ignores NaN values during distance computation.
+        - 当样本量超过 5000 时，会发出性能警告以提示潜在计算开销。
+          Prints a performance warning when dataset size exceeds 5000 samples due to computational cost.
     """
     if X.shape[0] > 5000:
         print(f"[WARN] Large dataset detected ({X.shape[0]} samples) — KNN imputation may be slow.")
@@ -260,22 +381,56 @@ def _fill_knn(X: pd.DataFrame, n_neighbors: int = 5, metric: str = "nan_euclidea
 def _fill_knn_hamming_abs(X: pd.DataFrame, n_neighbors: int = 5, fallback: float = 1.0, strategy: str = "mode", random_state: int | None = None) -> pd.DataFrame:
     """
     Hamming(abs) 等权 KNN 填补
-    ===================================================
-    使用未归一化汉明距离的 KNN 填补方法。（性能较慢，仅推荐小样本使用）
+    Equal-weight KNN imputation based on unnormalized Hamming distance.
+
+    使用未归一化的汉明距离计算样本间相似度，对缺失值进行 KNN 填补。
+    性能相对较慢，仅推荐在小样本数据上使用。
+    Performs KNN-based imputation using absolute (unnormalized) Hamming distance to measure sample similarity.
+    This method is slower and mainly recommended for small datasets.
 
     :param X: pd.DataFrame
-        基因型矩阵（值 ∈ {0,1,NaN}）。
+        基因型矩阵（取值 ∈ {0,1,NaN}）。
+        Genotype matrix with values in {0, 1, NaN}.
+
     :param n_neighbors: int, default=5
         近邻数量。
-    :param fallback: float, default=1.0
-        若所有邻居均缺失时的回退值。
-    :param strategy: str, default="mode"
-        填补策略："mode" / "round" / "mean" / "prob"。
-    :param random_state: int | None
-        随机种子，仅在 "prob" 下生效。
-    :return: pd.DataFrame
-        填补后的矩阵。
+        Number of nearest neighbors used for imputation.
 
+    :param fallback: float, default=1.0
+        当所有邻居均缺失时使用的回退值。
+        Fallback value when all neighbors have missing values.
+
+    :param strategy: str, default="mode"
+        填补策略，可选："mode"、"round"、"mean"、"prob"。
+        Imputation strategy: "mode", "round", "mean", or "prob".
+        - mode：众数（最常见值）；
+          Uses the most frequent value (mode).
+        - round：均值取整；
+          Rounds the mean of neighbors.
+        - mean：直接取均值；
+          Takes the arithmetic mean of neighbors.
+        - prob：基于均值概率的二项采样。
+          Uses Bernoulli sampling with mean value as probability.
+
+    :param random_state: int | None
+        随机种子，仅在 "prob" 策略下生效。
+        Random seed, only effective when using "prob" strategy.
+
+    :return: pd.DataFrame
+        填补后的矩阵，结构与输入一致。
+        The imputed DataFrame with the same structure as the input.
+
+    说明 / Notes:
+        - 先将 NaN 替换为占位符 (-1)，以便计算汉明距离。
+          NaN values are first replaced by a dummy value (-1) for Hamming distance computation.
+        - 使用 `NearestNeighbors(metric="hamming")` 获取最近邻索引与距离。
+          Nearest neighbors are computed using sklearn's `NearestNeighbors` with Hamming distance.
+        - 距离值乘以特征数以恢复“未归一化”距离度量。
+          Distances are multiplied by the number of features to obtain unnormalized values.
+        - 对每个缺失值，根据策略从邻居中聚合或采样得到填补值。
+          For each missing entry, the imputed value is derived from neighbors according to the chosen strategy.
+        - 当无可用邻居时，使用 fallback 值进行替代。
+          When no valid neighbors are available, the fallback value is used instead.
     """
     X = X.copy()
     n_samples, n_features = X.shape
@@ -319,35 +474,73 @@ def _fill_knn_hamming_abs(X: pd.DataFrame, n_neighbors: int = 5, fallback: float
 
 def _fill_knn_hamming_adaptive(X: pd.DataFrame, n_neighbors: int = 5, fallback: float = 1.0, target_decay: float = 0.5, strategy: str = "mode", log_samples: int = 3, random_state: int | None = None, parallel: bool = True) -> pd.DataFrame:
     """
-    Adaptive Weighted Hamming KNN（自适应加权填补）
-    ===================================================
-    采用自适应衰减 α 的加权 KNN 填补算法。
-    支持向量化与并行，适合高维稀疏 SNP 矩阵。
+    自适应加权汉明 KNN 填补（Adaptive Weighted Hamming KNN）
+    Adaptive weighted KNN imputation using exponential decay on Hamming distance.
+
+    本函数使用自适应衰减因子 α 对邻居距离进行加权，
+    在保持高精度的同时显著提升填补效率。
+    支持向量化与多核并行，适用于高维稀疏的基因型矩阵。
+    This function applies an adaptive decay factor α to neighbor distances for weighted imputation,
+    improving both accuracy and speed. It supports vectorized operations and multi-core parallelism,
+    making it suitable for high-dimensional sparse genotype matrices.
 
     :param X: pd.DataFrame
-        基因型矩阵（行=样本，列=SNP）。
+        基因型矩阵（行 = 样本，列 = SNP）。
+        Genotype matrix (rows = samples, columns = SNPs).
+
     :param n_neighbors: int, default=5
         近邻数量。
-    :param fallback: float, default=1.0
-        回退值。
-    :param target_decay: float, default=0.5
-        控制权重中位邻居衰减比例。
-    :param strategy: str, default="mode"
-        填补策略："mode"/"round"/"mean"/"prob"。
-    :param log_samples: int, default=3
-        日志样本数量（打印 α 与部分权重）。
-    :param random_state: int | None
-        随机种子。
-    :param parallel: bool, default=True
-        是否启用列级并行。
-    :return: pd.DataFrame
-        填补后的矩阵。
+        Number of nearest neighbors.
 
-    特性说明:
-        - 向量化 α 与权重计算；
-        - 列级并行填补；
-        - 可打印部分样本的权重分布；
-        - 高精度、速度快，适合中大规模数据。
+    :param fallback: float, default=1.0
+        若所有邻居均缺失时的回退值。
+        Fallback value used when all neighbors are missing.
+
+    :param target_decay: float, default=0.5
+        控制权重中位邻居的衰减比例。
+        Controls the weight decay for the median-distance neighbor.
+
+    :param strategy: str, default="mode"
+        填补策略，可选："mode"、"round"、"mean"、"prob"。
+        Imputation strategy: "mode", "round", "mean", or "prob".
+        - mode：基于加权投票的众数填补（推荐）。
+          Weighted majority vote (recommended).
+        - round：对加权均值四舍五入取整。
+          Rounds the weighted mean.
+        - mean：直接使用加权均值（连续输出）。
+          Uses weighted mean directly (continuous output).
+        - prob：按加权均值作为概率进行二项采样。
+          Bernoulli sampling based on weighted mean probability.
+
+    :param log_samples: int, default=3
+        控制打印日志的样本数量（输出 α 与前几个权重）。
+        Number of sample logs to display (prints α and top neighbor weights).
+
+    :param random_state: int | None
+        随机种子，用于 "prob" 策略的可重复性。
+        Random seed, used for reproducibility when using the "prob" strategy.
+
+    :param parallel: bool, default=True
+        是否启用列级并行（使用 Joblib）。
+        Whether to enable column-level parallelism via Joblib.
+
+    :return: pd.DataFrame
+        填补后的矩阵，与原输入结构相同。
+        The imputed DataFrame with the same structure as the input.
+
+    说明 / Notes:
+        - 首先将 NaN 替换为 -1，并使用 BallTree 基于汉明距离计算邻居。
+          NaN values are first replaced with -1, and BallTree is used to find neighbors via Hamming distance.
+        - 计算每个样本的距离中位数并自适应生成 α，随后按指数衰减计算权重矩阵。
+          For each sample, α is derived from its median distance, and weights are computed via exponential decay.
+        - 并行模式下，每列的填补任务使用 Joblib 分发至多核处理器执行。
+          In parallel mode, column-level tasks are distributed across multiple CPU cores via Joblib.
+        - 每列填补函数根据所选策略（mode/mean/round/prob）独立执行缺失值估算。
+          Each column’s imputation is performed independently based on the selected strategy.
+        - 随机选择 log_samples 个样本打印 α、距离与前 5 个邻居权重，以便验证权重分布合理性。
+          Randomly selected samples log α, distance, and top-5 neighbor weights for interpretability.
+        - 高效、可扩展，适合中大规模 SNP 矩阵的快速加权填补。
+          Efficient and scalable; suitable for medium-to-large SNP matrices with adaptive weighting.
     """
     X = X.copy()
     n_samples, n_features = X.shape
@@ -459,31 +652,64 @@ def _fill_knn_hamming_adaptive(X: pd.DataFrame, n_neighbors: int = 5, fallback: 
 
 def _fill_knn_hamming_balltree(X: pd.DataFrame, n_neighbors: int = 5, fallback: float = 1.0, strategy: str = "mode", parallel: bool = False, n_jobs: int = -1) -> pd.DataFrame:
     """
-    BallTree 加速 Hamming KNN 填补
-    ===================================================
-    基于 BallTree 的 Hamming 距离加速实现，
-    支持列向量化与多核并行。
+    基于 BallTree 的加速 Hamming KNN 填补
+    Accelerated Hamming KNN imputation using BallTree index.
+
+    使用 BallTree 空间索引在汉明距离下进行高效近邻搜索，
+    支持列级并行和向量化操作。相比传统 KNN 填补，
+    该方法速度更快、内存占用更低，适合中等规模数据集。
+    Uses BallTree spatial indexing to accelerate Hamming distance neighbor search.
+    Supports column-level parallelism and vectorized computation.
+    Faster and more memory-efficient than traditional KNN imputation,
+    suitable for medium-scale datasets.
 
     :param X: pd.DataFrame
-        基因型矩阵（行=样本，列=SNP）。
+        基因型矩阵（行 = 样本，列 = SNP）。
+        Genotype matrix (rows = samples, columns = SNPs).
+
     :param n_neighbors: int, default=5
         近邻数量。
+        Number of nearest neighbors.
+
     :param fallback: float, default=1.0
         若所有邻居均缺失时的回退值。
-    :param strategy: str, default="mode"
-        填补策略："mode"/"mean"/"round"。
-    :param parallel: bool, default=False
-        是否启用并行。
-    :param n_jobs: int, default=-1
-        并行任务数（默认所有 CPU 核）。
-    :return: pd.DataFrame
-        填补后的矩阵。
+        Fallback value when all neighbors have missing values.
 
-    特性说明:
-        - BallTree 空间索引加速；
-        - 向量化 + 列级并行；
-        - 速度快、内存占用低；
-        - 推荐中等规模数据使用。
+    :param strategy: str, default="mode"
+        填补策略，可选："mode"、"mean"、"round"。
+        Imputation strategy: "mode", "mean", or "round".
+        - mode：统计邻居中出现频率最高的值（众数）。
+          Uses the most frequent value (mode) among neighbors.
+        - mean：计算邻居的均值作为填补值。
+          Takes the arithmetic mean of neighbors.
+        - round：对均值进行四舍五入。
+          Rounds the mean to the nearest integer.
+
+    :param parallel: bool, default=False
+        是否启用列级并行（Joblib）。
+        Whether to enable column-level parallelism via Joblib.
+
+    :param n_jobs: int, default=-1
+        并行任务数（默认使用所有 CPU 核心）。
+        Number of parallel jobs (default: use all CPU cores).
+
+    :return: pd.DataFrame
+        填补后的矩阵，结构与输入一致。
+        The imputed DataFrame with the same structure as the input.
+
+    说明 / Notes:
+        - 使用 BallTree 在 Hamming 距离空间中高效搜索最近邻，性能优于暴力搜索。
+          BallTree efficiently searches nearest neighbors under Hamming distance, outperforming brute-force search.
+        - 小数据集时会自动禁用并行，以避免进程创建开销。
+          Automatically disables parallel mode for small datasets to reduce multiprocessing overhead.
+        - 每列独立执行填补操作，可串行或并行运行。
+          Each column is processed independently and can run in serial or parallel mode.
+        - 对缺失样本，提取邻居值并根据策略执行统计（众数或均值）。
+          For missing samples, neighbor values are aggregated according to the chosen strategy (mode or mean).
+        - 若所有邻居均为缺失值，则使用 fallback 值进行填充。
+          When all neighbor values are missing, the fallback value is used.
+        - 推荐用于中等规模数据集（约 10⁴~10⁵ 个样本 × SNP 特征）。
+          Recommended for medium-scale datasets (~10⁴–10⁵ samples × SNP features).
     """
     X = X.copy()
     n_samples, n_features = X.shape
@@ -574,38 +800,70 @@ def _fill_knn_hamming_balltree(X: pd.DataFrame, n_neighbors: int = 5, fallback: 
     return X_filled
 
 
-def _fill_knn_faiss(
-    X: pd.DataFrame,
-    n_neighbors: int = 5,
-    n_components: int = 50,
-    fallback: float = 1.0,
-    strategy: str = "mode",
-    random_state: int | None = 42,
-    batch_size: int = 2000,
-) -> pd.DataFrame:
+def _fill_knn_faiss(X: pd.DataFrame, n_neighbors: int = 5, n_components: int = 50, fallback: float = 1.0, strategy: str = "mode", random_state: int | None = 42, batch_size: int = 2000) -> pd.DataFrame:
     """
-    PCA + Faiss 近似 KNN 填补（增强版，支持 IncrementalPCA）
-    ==============================================================
-    适用于大规模基因型矩阵（>10k 样本），
-    在 PCA 阶段自动选择普通 PCA 或 IncrementalPCA，
-    并使用 Faiss 加速最近邻搜索（CPU/GPU 均可）。
+    PCA + Faiss 近似 KNN 填补（增强版，支持 IncrementalPCA）  (未验证)
+    PCA + Faiss approximate KNN imputation (enhanced version with IncrementalPCA support).  (invalid)
+
+    该函数专为大规模基因型矩阵（>10k 样本）设计：
+    先通过 PCA/IncrementalPCA 降维压缩特征空间，再使用 Faiss 实现高速 KNN 搜索。
+    自动在 CPU 与 GPU 间切换，可在有限内存环境下高效完成缺失值填补。
+    This function is designed for large-scale genotype matrices (>10k samples):
+    It first performs dimensionality reduction via PCA or IncrementalPCA,
+    then uses Faiss for fast approximate nearest-neighbor search (CPU/GPU supported).
+    The method adapts automatically to available memory, ensuring robust imputation on big data.
 
     :param X: pd.DataFrame
-        基因型矩阵 (rows = samples, cols = SNPs; values ∈ {0, 1, NaN})
-    :param n_neighbors: int
+        基因型矩阵（行 = 样本，列 = SNP；值 ∈ {0, 1, NaN}）。
+        Genotype matrix (rows = samples, columns = SNPs; values ∈ {0, 1, NaN}).
+
+    :param n_neighbors: int, default=5
         KNN 近邻数量。
-    :param n_components: int
-        降维后的维度数。
-    :param fallback: float
+        Number of nearest neighbors used for imputation.
+
+    :param n_components: int, default=50
+        PCA 降维后的特征维度数。
+        Number of components retained after PCA reduction.
+
+    :param fallback: float, default=1.0
         当所有邻居均缺失时使用的回退值。
-    :param strategy: str
-        填补策略："mode" | "mean" | "round"。
-    :param random_state: int | None
-        随机种子。
-    :param batch_size: int
-        IncrementalPCA 的每批样本数。
+        Fallback value used when all neighbors are missing.
+
+    :param strategy: str, default="mode"
+        填补策略，可选："mode"、"mean"、"round"。
+        Imputation strategy: "mode", "mean", or "round".
+        - mode：使用邻居的众数。
+          Uses the most frequent neighbor value (mode).
+        - mean：取邻居均值。
+          Takes the arithmetic mean of neighbors.
+        - round：对均值进行四舍五入。
+          Rounds the mean to the nearest integer.
+
+    :param random_state: int | None, default=42
+        随机种子，用于保证可重复性。
+        Random seed for reproducibility.
+
+    :param batch_size: int, default=2000
+        IncrementalPCA 的批处理大小。
+        Batch size for IncrementalPCA.
+
     :return: pd.DataFrame
-        填补后的 DataFrame。
+        填补后的矩阵（行列与原输入一致）。
+        The imputed DataFrame with the same shape as the input.
+
+    说明 / Notes:
+        - 当样本数较大时自动启用 IncrementalPCA，以降低内存占用。
+          Automatically switches to IncrementalPCA for large datasets to reduce memory usage.
+        - PCA 阶段先使用列均值暂时填补 NaN，以确保矩阵可分解。
+          NaN values are temporarily filled with column means before PCA decomposition.
+        - Faiss 用于在 PCA 降维空间中加速近邻搜索，可显著提升性能。
+          Faiss accelerates KNN search in the reduced PCA space for high efficiency.
+        - 支持 CPU 版本 (faiss-cpu) 与 GPU 版本 (faiss-gpu)，自动检测环境。
+          Supports both CPU (`faiss-cpu`) and GPU (`faiss-gpu`) backends depending on environment.
+        - 若 PCA 失败，则自动回退到列众数填补以确保稳定性。
+          If PCA fails, the function automatically falls back to column-mode imputation.
+        - 推荐用于样本量超过 10k 的大规模基因型数据集。
+          Recommended for large-scale genotype datasets with more than 10k samples.
     """
     try:
         import faiss
@@ -670,36 +928,68 @@ def _fill_knn_faiss(
     return pd.DataFrame(X_np, index=X.index, columns=X.columns)
 
 
-
 def _fill_knn_auto(X: pd.DataFrame, n_neighbors: int = 5, fallback: float = 1.0, missing_threshold: float = 0.4, random_state: int | None = None, verbose: bool = True) -> pd.DataFrame:
     """
-    自动选择最优 KNN 填补算法（Auto-select）
-    ===================================================
-    根据样本规模与缺失率自动选择最佳策略。
+    自动选择最优 KNN 填补算法（Auto-select KNN Imputation）
+    Automatically selects the optimal KNN imputation strategy based on dataset scale and missing rate.
 
-    策略逻辑：
-        1. 内存估算 > 20 GB → 众数填补 (mode)
-        2. 缺失率 ≥ 40% → Adaptive Hamming (prob)
-        3. n < 500 → Hamming(abs)
-        4. 500 ≤ n ≤ 5000 → BallTree 并行 KNN
-        5. 5000 < n ≤ 10000 → Adaptive Weighted Hamming
-        6. n > 10000 → PCA + Faiss (自动切换 IncrementalPCA)
+    根据样本规模、缺失率与内存估算值，自动选择最合适的 KNN 填补算法：
+    小数据使用精确 Hamming，较大数据使用 BallTree 或自适应加权 Hamming，
+    超大数据集自动切换至 PCA + Faiss 近似 KNN 填补。
+    Automatically selects the appropriate KNN-based imputation method
+    depending on dataset size, missingness ratio, and estimated memory footprint.
+    Small datasets use exact Hamming, medium datasets use BallTree or adaptive weighting,
+    and very large datasets fall back to PCA + Faiss for approximate KNN.
 
     :param X: pd.DataFrame
-        基因型矩阵。
-    :param n_neighbors: int
+        基因型矩阵（行 = 样本，列 = SNP）。
+        Genotype matrix (rows = samples, columns = SNPs).
+
+    :param n_neighbors: int, default=5
         近邻数量。
-    :param fallback: float
-        回退值。
-    :param missing_threshold: float
-        缺失率阈值（默认 0.4）。
+        Number of nearest neighbors.
+
+    :param fallback: float, default=1.0
+        当所有邻居均缺失时使用的回退值。
+        Fallback value used when all neighbors are missing.
+
+    :param missing_threshold: float, default=0.4
+        缺失率阈值，超过此比例触发高缺失模式。
+        Missing rate threshold to trigger high-missingness strategy.
+
     :param random_state: int | None
         随机种子。
-    :param verbose: bool
-        是否打印日志。
+        Random seed for reproducibility.
+
+    :param verbose: bool, default=True
+        是否打印算法选择与执行日志。
+        Whether to print detailed selection and execution logs.
 
     :return: pd.DataFrame
-        填补后的矩阵。
+        填补后的矩阵，结构与输入一致。
+        The imputed DataFrame with the same structure as the input.
+
+    说明 / Notes:
+        - 该函数通过自动检测数据规模与缺失率，在多种 KNN 变体间动态选择最优算法。
+          Automatically detects dataset scale and missingness to dynamically pick the optimal imputation algorithm.
+        - 算法选择逻辑如下：
+          The strategy selection logic is as follows:
+            1. 估算内存占用 > 20 GB → 列众数填补（`_fill_mode`）
+               Estimated memory > 20 GB → use simple column-wise mode imputation.
+            2. 缺失率 ≥ 40% → 自适应概率 Hamming（`_fill_knn_hamming_adaptive`, strategy="prob"）
+               Missing rate ≥ 40% → adaptive probabilistic Hamming imputation.
+            3. n < 500 → 精确 Hamming(abs)（`_fill_knn_hamming_abs`）
+               n < 500 → exact Hamming(abs) KNN.
+            4. 500 ≤ n ≤ 5000 → BallTree 并行 KNN（`_fill_knn_hamming_balltree`）
+               500 ≤ n ≤ 5000 → BallTree-accelerated parallel KNN.
+            5. 5000 < n ≤ 10000 → 自适应加权 Hamming（`_fill_knn_hamming_adaptive`）
+               5000 < n ≤ 10000 → adaptive weighted Hamming KNN.
+            6. n > 10000 → PCA + Faiss（`_fill_knn_faiss`，自动切换 IncrementalPCA）
+               n > 10000 → PCA + Faiss approximate KNN with automatic IncrementalPCA fallback.
+        - 若 Faiss 或 PCA 失败，函数将自动回退至列众数填补以确保稳定性。
+          If Faiss or PCA fails, the function safely falls back to mode-based imputation.
+        - 该方法适用于自动化数据管线，可在无需人工干预的情况下选择高效算法。
+          Intended for automated preprocessing pipelines, requiring no manual tuning of imputation strategy.
     """
     # === 基础信息 ===
     n_samples, n_features = X.shape
@@ -781,30 +1071,54 @@ def _fill_knn_auto(X: pd.DataFrame, n_neighbors: int = 5, fallback: float = 1.0,
             print(f"[WARN] Faiss KNN failed ({e}), falling back to MODE imputation.")
             return _fill_mode(X, fallback=fallback)
 
+
 def impute_missing(X: pd.DataFrame, method: str = "mode", n_neighbors: int = 5) -> pd.DataFrame:
     """
     通用缺失值填补入口函数
-    ===================================================
-    根据参数选择填补方法。
+    General entry point for missing-value imputation.
 
-    支持方法：
-        - "mode"                  → 众数填补；
-        - "mean"                  → 均值填补；
-        - "knn"                   → sklearn KNN；
-        - "knn_hamming_abs"       → 等权 Hamming；
-        - "knn_hamming_adaptive"  → 自适应加权 Hamming；
-        - "knn_hamming_balltree"  → BallTree 加速；
-        - "knn_hamming_faiss"     → PCA + Faiss 近似 KNN 填补
-        - "knn_auto"              → 自动选择策略。
+    根据输入参数自动选择对应的填补算法，并执行缺失值替换。
+    Automatically selects and applies the appropriate imputation method based on input parameters.
+
+    支持方法 / Supported methods:
+        - "mode"                 → 列众数填补 / Column-wise mode imputation
+        - "mean"                 → 列均值填补 / Column-wise mean imputation
+        - "knn"                  → sklearn KNN（欧氏距离） / sklearn KNN (Euclidean distance)
+        - "knn_hamming_abs"      → 等权 Hamming KNN / Equal-weight Hamming KNN
+        - "knn_hamming_adaptive" → 自适应加权 Hamming KNN / Adaptive weighted Hamming KNN
+        - "knn_hamming_balltree" → BallTree 加速 Hamming KNN / BallTree-accelerated Hamming KNN
+        - "knn_faiss"            → PCA + Faiss 近似 KNN 填补 / PCA + Faiss approximate KNN
+        - "knn_auto"             → 自动策略选择 / Automatic strategy selection
 
     :param X: pd.DataFrame
-        基因型矩阵（0=参考等位基因, 1=变异等位基因, 3=缺失）。
-    :param method: str
-        填补方法。
+        基因型矩阵（0 = 参考等位基因, 1 = 变异等位基因, 3 = 缺失）。
+        Genotype matrix (0 = reference allele, 1 = alternate allele, 3 = missing).
+
+    :param method: str, default="mode"
+        填补方法（支持上述关键字）。
+        Imputation method to apply (see list above).
+
     :param n_neighbors: int, default=5
-        KNN 近邻数。
+        KNN 近邻数量（仅对 KNN 类方法有效）。
+        Number of nearest neighbors (applicable to KNN-based methods only).
+
     :return: pd.DataFrame
-        填补后的矩阵。
+        填补后的矩阵，与输入结构一致。
+        The imputed DataFrame with the same structure as the input.
+
+    说明 / Notes:
+        - 本函数统一管理所有缺失值填补算法的调用逻辑，支持自动日志输出与方法检测。
+          This function manages all imputation methods in a unified interface, with automatic logging and method dispatch.
+        - 首先将编码值 3 转换为 NaN，以兼容 pandas/numpy 运算。
+          Values encoded as `3` are first converted to NaN for compatibility with pandas/numpy operations.
+        - 内部通过分块处理避免大矩阵布尔索引导致的内存峰值问题。
+          Missing-value replacement is performed in batches to prevent excessive memory usage.
+        - 支持从简单统计方法到复杂 KNN/Faiss 算法的多层级策略。
+          Supports a hierarchy of methods from simple statistical filling to advanced KNN/Faiss algorithms.
+        - 自动打印填补前后缺失数量，并报告残留 NaN 情况。
+          Prints the number of missing values before/after imputation and reports remaining NaNs, if any.
+        - 若 method 参数无效，将抛出 ValueError。
+          Raises ValueError if the given method name is invalid.
     """
     print(f"[INFO] Impute missing values with method: {method}")
     method = method.lower()
@@ -843,31 +1157,60 @@ def impute_missing(X: pd.DataFrame, method: str = "mode", n_neighbors: int = 5) 
     elif method == "knn_auto":
         filled =  _fill_knn_auto(Z, n_neighbors=n_neighbors, random_state=42)
     else:
-        raise ValueError(f"未知填补方法: {method}")
+        raise ValueError(f"Unknown filling method: {method}")
 
     after_nans = filled.isna().sum().sum()
     replaced = before_nans - after_nans
 
     if after_nans > 0:
-        print(f"[WARN] 填补后仍存在 {after_nans} 个 NaN（可能为异常列）。")
-    print(f"[OK] {method.upper():<5} 填补完成 | 替换缺失值数: {replaced} | 残留 NaN: {after_nans}")
+        print(f"[WARN] There are still {after_nans} NaNs after padding (possibly an abnormal column).")
+    print(f"[OK] {method.upper():<5} Filling complete | Number of missing values replaced: {replaced} | Residual NaN: {after_nans}")
 
     return filled
 
 
 def grouped_imputation(X, labels, method: str = "mode"):
     """
-    按外部标签分组执行缺失值填补（封装版）
-    ===================================================
+    按外部标签分组执行缺失值填补（封装版）  (未验证)
+    Perform missing-value imputation by external group labels (wrapper version).  (invalide)
+
+    根据外部分类标签（如地理区域或单倍群）将样本划分为子集，
+    并在每个分组内部独立执行缺失值填补。
+    若未提供标签，则执行全局填补。
+    Performs missing-value imputation separately for each group defined by an external label
+    (e.g., World Zone, Y haplogroup). If no label is provided, applies global imputation.
+
     :param X: pd.DataFrame
-        原始基因型矩阵。
+        原始基因型矩阵（行 = 样本，列 = SNP）。
+        Original genotype matrix (rows = samples, columns = SNPs).
+
     :param labels: pd.Series or None
-        外部标签列（例如 World Zone / Y haplogroup）。
-        若为 None，则执行全局填补。
-    :param method: str
-        填补方法，如 "mode"、"knn_hamming_adaptive"。
+        外部分组标签列，例如世界区域或单倍群分类。
+        若为 None，则执行全局填补而不分组。
+        External grouping labels (e.g., World Zone or haplogroup).
+        If None, global imputation is performed without grouping.
+
+    :param method: str, default="mode"
+        缺失值填补方法（如 "mode"、"knn_hamming_adaptive" 等）。
+        Imputation method to use (e.g., "mode", "knn_hamming_adaptive", etc.).
+
     :return: pd.DataFrame
-        分组填补后的矩阵。
+        分组填补后的完整矩阵，与原矩阵索引顺序一致。
+        The fully imputed DataFrame, preserving the original index order.
+
+    说明 / Notes:
+        - 若未提供标签（labels=None），函数将自动执行全局填补。
+          If `labels` is None, a single global imputation will be performed.
+        - 每个分组根据标签独立执行填补，分组之间互不影响。
+          Each label group is processed independently without affecting others.
+        - 样本量过小（≤5）时，自动降级为列众数填补以避免过拟合。
+          For small groups (≤5 samples), automatically switches to mode imputation.
+        - 若分组过小且方法为 "knn_faiss"，会回退为 "mode" 填补。
+          If the group is too small and method is "knn_faiss", falls back to "mode" imputation.
+        - 处理完成后将所有分组结果重新合并并按原索引排序。
+          After processing, all group results are concatenated and re-indexed in original order.
+        - 输出结果适用于保持地理或生物学一致性的局部分布式填补。
+          Designed for localized or biologically consistent imputation respecting group structure.
     """
     if labels is None:
         print(f"[INFO] Global imputation (no grouping label provided) ...")
