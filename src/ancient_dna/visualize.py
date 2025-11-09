@@ -18,9 +18,8 @@ legend layouts, and export options.
       Smart visualization of missing-value patterns (pixel-based or aggregated modes).
     - plot_cluster_on_embedding(): 绘制聚类结果叠加图，并显示主标签与纯度。
       Visualize clusters on embeddings, showing dominant label and purity.
-    - plot_silhouette_trend():
-        绘制聚类数与平均轮廓系数的关系趋势图。
-        Plot the relationship between number of clusters and silhouette score.
+    - plot_silhouette_trend(): 绘制聚类数与平均轮廓系数的关系趋势图。
+      Plot the relationship between number of clusters and silhouette score.
 
 说明 / Description:
     本模块作为数据分析的“可视化层”，
@@ -39,18 +38,7 @@ from pathlib import Path
 from matplotlib.colors import ListedColormap
 import numpy as np
 
-def plot_embedding(
-        df: pd.DataFrame,
-        labels: pd.Series | None = None,
-        title: str = "Projection",
-        save_path: str | Path | None = None,
-        figsize: tuple = (10, 7),
-        legend_pos: str = "right",
-        cmap: str = "tab20",
-        legend_max: int = 20,
-        legend_sort: bool = True,
-        others_color : tuple = (0.7, 0.7, 0.7, 0.5)
-) -> None:
+def plot_embedding( df: pd.DataFrame, labels: pd.Series | None = None, title: str = "Projection", save_path: str | Path | None = None, figsize: tuple = (10, 7), legend_pos: str = "right", cmap: str = "tab20", legend_max: int = 20, legend_sort: bool = True, others_color : tuple = (0.7, 0.7, 0.7, 0.5)) -> None:
     """
     绘制降维结果（支持 2D）
     Plot 2D embedding projection with consistent color mapping.
