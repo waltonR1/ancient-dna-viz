@@ -301,8 +301,9 @@ def streaming_umap_from_parquet(dataset_dir: str | Path, n_components: int = 2, 
         part_path = dataset_dir / meta["part"]
         cols = meta["columns"][:max_cols]
         table = pq.read_table(part_path, columns=cols)
-        X = table.to_pandas().fillna(1.0)
-        X_np = X.to_numpy(dtype=np.float32)
+        cols_np = [c.to_numpy(zero_copy_only=False) for c in table.columns]
+        X_np = np.column_stack(cols_np).astype(np.float32)
+        X_np = np.nan_to_num(X_np, nan=1.0)
 
         # 第一次设定标准列数
         if expected_features is None:
@@ -321,8 +322,9 @@ def streaming_umap_from_parquet(dataset_dir: str | Path, n_components: int = 2, 
         part_path = dataset_dir / meta["part"]
         cols = meta["columns"][:max_cols]
         table = pq.read_table(part_path, columns=cols)
-        X = table.to_pandas().fillna(1.0)
-        X_np = X.to_numpy(dtype=np.float32)
+        cols_np = [c.to_numpy(zero_copy_only=False) for c in table.columns]
+        X_np = np.column_stack(cols_np).astype(np.float32)
+        X_np = np.nan_to_num(X_np, nan=1.0)
 
         # 若特征维度不足，补齐
         if X_np.shape[1] < expected_features:
@@ -338,10 +340,11 @@ def streaming_umap_from_parquet(dataset_dir: str | Path, n_components: int = 2, 
     # === Step 4: UMAP 降维 ===
     print(f"[UMAP] Running final UMAP on compressed data...")
     umap_model = UMAP(
-        n_neighbors=15,
+        n_neighbors=50,
+        min_dist=0.3,
+        metric="hamming",
         n_components=n_components,
-        random_state=random_state,
-        metric="euclidean"
+        random_state=random_state
     )
     emb = umap_model.fit_transform(X_all)
     emb = pd.DataFrame(emb, columns=[f"Dim{i+1}" for i in range(n_components)])

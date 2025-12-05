@@ -164,7 +164,7 @@ def compute_missing_rates(X: pd.DataFrame) -> Tuple[pd.Series, pd.Series]:
     return sample_missing, snp_missing
 
 
-def filter_by_missing(X: pd.DataFrame, sample_missing: pd.Series, snp_missing: pd.Series, max_sample_missing: float = 0.8, max_snp_missing: float = 0.8) -> pd.DataFrame:
+def filter_by_missing(X: pd.DataFrame, sample_missing: pd.Series, snp_missing: pd.Series, max_sample_missing: float = 0.8, max_snp_missing: float = 0.8) -> Tuple[pd.DataFrame, pd.Series]:
     """
     按缺失率阈值过滤样本与 SNP（默认阈值较宽松，可在后续调整）。
     Filter samples and SNPs based on missing rate thresholds (default thresholds are lenient and can be adjusted later).
@@ -208,7 +208,44 @@ def filter_by_missing(X: pd.DataFrame, sample_missing: pd.Series, snp_missing: p
     if X_filtered.empty:
         raise ValueError("[ERROR] The filtered matrix is empty. Please adjust the threshold.")
 
-    return X_filtered
+    return X_filtered, keep_rows
+
+
+def filter_meta_by_rows(meta, keep_rows, label="meta"):
+    """
+    根据 keep_rows 掩码过滤元数据，并打印详细日志。
+    Filter metadata by keep_rows mask with logging.
+
+    :param meta: pd.DataFrame
+        元数据表，行数与基因矩阵一致。
+    :param keep_rows: pd.Series[bool]
+        来自 filter_by_missing() 的布尔掩码。
+    :param label: str
+        日志名称标识（默认 "meta"）。
+    :return: pd.DataFrame
+        过滤后的元数据。
+    """
+    total = len(meta)
+    kept = keep_rows.sum()
+    removed = total - kept
+
+    print(f"[INFO] Filtering {label}:")
+    print(f"       - Total rows    : {total}")
+    print(f"       - Kept rows     : {kept} ({kept/total:.2%})")
+    print(f"       - Removed rows  : {removed} ({removed/total:.2%})")
+
+    # 执行过滤
+    meta_filtered = meta.loc[keep_rows].reset_index(drop=True)
+
+    # 一致性检查
+    if len(meta_filtered) != kept:
+        raise ValueError(
+            f"[ERROR] {label} filtering mismatch: "
+            f"expected {kept}, got {len(meta_filtered)}"
+        )
+
+    print(f"[OK] {label} filtering completed.\n")
+    return meta_filtered
 
 
 def _fill_mode(Z: pd.DataFrame, fallback: float = 1, save_disk: bool = True) -> pd.DataFrame:
@@ -1279,3 +1316,142 @@ def grouped_imputation(X, labels, method: str = "mode"):
     X_filled = pd.concat(filled_groups).sort_index()
     print(f"[OK] Grouped imputation completed for {len(filled_groups)} groups.")
     return X_filled
+
+
+def clean_labels_and_align(
+        emb: pd.DataFrame,
+        labels: pd.Series,
+        collapse_y: bool = False,
+        invalid_values=None,
+        whitelist=None,
+        
+):
+    """
+    清洗分类标签并与降维后的 embedding 对齐。
+    Clean categorical labels and align them with the embedding matrix.
+
+    ==========================
+    功能说明 / Functionality
+    ==========================
+    - 移除无效标签（如 "NA", "n/a", "..", ""）
+    - 若设置 whitelist，则仅保留白名单中的类别
+    - 返回过滤后的 labels 和 emb，二者 index 完全一致
+
+    ==========================
+    参数说明 / Parameters
+    ==========================
+
+    :param emb: pd.DataFrame
+        降维后的 2D/ND 嵌入矩阵，index 为 sample IDs。
+        Embedding matrix (2D/ND), index must match sample IDs.
+
+    :param labels: pd.Series
+        标签序列，index 与 emb 对齐。
+        Label series aligned with embedding rows.
+
+    :param collapse_y:  boolean defeat = False
+        是否将 Y haplogroup 映射到大类
+        If True, collapse Y haplogroups into larger haplogroup classes.
+
+    :param invalid_values: list | None
+        要过滤掉的标签值（黑名单）。
+        Default：["", " ", "NA", "N/A", "na", "..",
+                  "n/a(female)", "n/a(sex unknown)", "n/a(female)"]
+        List of invalid labels to remove.
+
+    :param whitelist: list | None
+        若提供，仅保留该列表中的标签类别。
+        If provided, keep only these classes.
+
+    ==========================
+    返回值 / Returns
+    ==========================
+    :return emb_clean, labels_clean:
+        - emb_clean: 过滤后的 embedding
+        - labels_clean: 过滤后的标签（与 emb_clean 对齐）
+    """
+
+    # ---- 默认无效类别（可扩展）----
+    if invalid_values is None:
+        invalid_values = {
+            "", " ", ".", "..", "...",
+            "NA", "N/A", "na", "Na", "nA", "n/a", "n\\a",
+            "nan", "NaN",
+
+            # ADNA 中常见性别型 n/a (female)
+            "n/a (female)", "n/a(female)", "n/a(Female)",
+            "n/a (Female)", "n/a  (sex unknown)",
+            "n/a(sex unknown)", "n/a (sex unknown)",
+            "n/a",
+
+            # 其他“未知”标注
+            "unknown", "Unknown", "UNKNOWN",
+            "undetermined", "Undetermined", "UNDETERMINED",
+            "-", "—", "_", "?"
+        }
+
+    # ===== 2. 全部转成 str，并 strip 空格 =====
+    labels_clean = labels.astype(str).str.strip()
+
+    # ===== 3. 全部转成小写，便于比较 =====
+    normalized = labels_clean.str.lower()
+
+    # 将 invalid 映射为统一小写
+    invalid_lower = {v.lower() for v in invalid_values}
+
+    # ===== 4. 标记有效标签 =====
+    mask_valid = ~normalized.isin(invalid_lower)
+
+    # ===== 5. 若有 whitelist，进一步过滤 =====
+    if whitelist is not None:
+        whitelist_lower = {w.lower() for w in whitelist}
+        mask_valid &= normalized.isin(whitelist_lower)
+
+    # ===== 6. 根据 valid index 过滤 embedding =====
+    valid_idx = labels.index[mask_valid]
+
+    emb_clean = emb.loc[valid_idx].reset_index(drop=True)
+    labels_clean = labels_clean.loc[valid_idx].reset_index(drop=True)
+
+    if collapse_y:
+        labels_clean = _collapse_y_haplogroup(labels_clean)
+
+    return emb_clean, labels_clean
+
+
+def _collapse_y_haplogroup(y: pd.Series) -> pd.Series:
+    """
+    将 Y haplogroup 映射到大类（Macro Haplogroup）
+    Collapse detailed Y haplogroups to macro-level (first capital letter).
+
+    例如：
+        "R1b1a2"   → "R"
+        "R-M269"   → "R"
+        "J2a1"     → "J"
+        "E1b1a"    → "E"
+
+    说明:
+        - 此函数不会删除无效标签（如 n/a），clean_labels_and_align 会处理
+        - 仅对有效的 Y 值进行“取首字母大写”
+    """
+
+    y = y.astype(str).str.strip()
+
+    macro = []
+    for v in y:
+        v = v.strip()
+
+        # 无效值（n/a, .., unknown）保持原样，由 clean() 去掉
+        if len(v) == 0:
+            macro.append(v)
+            continue
+
+        first = v[0].upper()
+
+        # 只对 alphabet 开头的 haplogroup 做宏类合并
+        if first.isalpha():
+            macro.append(first)
+        else:
+            macro.append(v)
+
+    return pd.Series(macro, index=y.index, name=y.name + "_macro")

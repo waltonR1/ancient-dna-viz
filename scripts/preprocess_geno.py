@@ -32,62 +32,75 @@ def main():
 
     start_load = time.time()
     # 使用 ancient_dna 的接口（内部封装 genotopython）
-    X = adna.genofileToPandas(str(geno_path), str(snp_path), str(ind_path), transpose=True)
-    meta = adna.CreateLocalityFile(str(anno_path), toCSV=False, verbose=True)
+    # X = adna.genofileToPandas(str(geno_path), str(snp_path), str(ind_path), transpose=True)
+    # meta = adna.CreateLocalityFile(str(anno_path), toCSV=False, verbose=True, hapl=True)
 
     # === [ALIGN] 初次对齐，统一索引 ===
-    X, meta = adna.align_by_id(X.index.to_series(), X, meta)
+    # X, meta = adna.align_by_id(X.index.to_series(), X, meta)
 
-    X.to_pickle(processed_dir / "geno_packed.pkl")
-    # X = pd.read_pickle(processed_dir / "geno_packed.pkl")
+    # X.to_pickle(processed_dir / "geno_packed.pkl")
+    X = pd.read_pickle(processed_dir / "geno_packed.pkl")
 
-    meta.to_pickle(processed_dir / "meta_packed.pkl")
-    # meta = pd.read_pickle(processed_dir / "meta_packed.pkl")
+    # meta.to_pickle(processed_dir / "meta_packed.pkl")
+    meta = pd.read_pickle(processed_dir / "meta_packed.pkl")
+
+    # adna.save_csv(meta, processed_dir / "meta_packed.csv")
 
     print(f"[OK] Data loaded in {time.time()-start_load:.2f}s | Matrix: {X.shape}, Meta: {meta.shape}")
 
     # === 2. 缺失值可视化与过滤 ===
     missing_plot_path = results_dir / "Missing_packed.png"
-    adna.plot_missing_values(X, save_path=missing_plot_path)
-    sm, cm = adna.compute_missing_rates(X)
-    Xf = adna.filter_by_missing(X, sm, cm)
+    # adna.plot_missing_values(X, save_path=missing_plot_path)
+    # sm, cm = adna.compute_missing_rates(X)
+    # Xf, keep_rows = adna.filter_by_missing(X, sm, cm, max_snp_missing=0.8, max_sample_missing=0.8)
 
-    Xf.to_pickle(processed_dir / "Xf_packed.pkl")
-    # Xf = pd.read_pickle(processed_dir / "Xf_packed.pkl")
+    # metaf = adna.filter_meta_by_rows(meta, keep_rows)
 
-    adna.save_report(adna.build_missing_report(sm, cm), results_dir / "missing_report_packed.csv")
-    adna.plot_missing_values(Xf, save_path=results_dir / "Missing_after_filtering_packed.png")
+    # Xf.to_pickle(processed_dir / "Xf_packed.pkl")
+    Xf = pd.read_pickle(processed_dir / "Xf_packed.pkl")
+    # metaf.to_pickle(processed_dir / "metaf_packed.pkl")
+    metaf = pd.read_pickle(processed_dir / "metaf_packed.pkl")
+
+    # adna.save_csv(metaf, processed_dir / "metaf_packed.csv")
+
+    # adna.save_report(adna.build_missing_report(sm, cm), results_dir / "missing_report_packed.csv")
+    # adna.plot_missing_values(Xf, save_path=results_dir / "Missing_after_filtering_packed.png")
 
     # === 3. 标签列 ===
     label_columns = ["World Zone"]
+    # label_columns = ["Y haplogroup"]
+    print("[DEBUG] metaf columns:", list(metaf.columns))
+
     runtime_records = []
 
     # === 4. 组合参数 ===
-    impute_methods = ["knn_auto"]
+    impute_methods = ["mode"]
     reduce_methods = ["UMAP"]
 
     # === 5. 主循环 ===
     for impute_method in impute_methods:
         for reduce_method in reduce_methods:
             for label_col in label_columns:
-                labels = meta[label_col] if label_col in meta.columns else None
+                labels = metaf[label_col] if label_col in metaf.columns else None
                 print(f"\n[INFO] Running combination → Impute: {impute_method.upper()} | Reduce: {reduce_method.upper()}")
 
                 start = time.time()
                 try:
                     # === 缺失值填补 ===
-                    Xi = adna.impute_missing(Xf, method=impute_method)
+                    # Xi = adna.impute_missing(Xf, method=impute_method)
                     # Xi = adna.grouped_imputation(Xf, labels, method=impute_method)
                     print(f"[OK] Imputation ({impute_method}) complete.")
 
-                    Xi.to_pickle(processed_dir / f"Xi_{impute_method}_packed.pkl")
-                    # Xi = pd.read_pickle(processed_dir / f"Xi_{impute_method}_packed.pkl")
+                    # Xi.to_pickle(processed_dir / f"Xi_{impute_method}_packed.pkl")
+                    Xi = pd.read_pickle(processed_dir / f"Xi_{impute_method}_packed.pkl")
 
                     # === 降维 / 懒加载聚类 ===
                     if Xi.empty:
                         print("[INFO] Xi is empty (sharded mode detected) → using lazy clustering + UMAP")
-                        latest_dir = max((processed_dir.glob("mode_filled_*")), key=lambda p: p.stat().st_mtime)
-                        emb = adna.streaming_umap_from_parquet(latest_dir, n_components=2, max_cols=50000, pca_dim=50)
+                        # latest_dir = max((processed_dir.glob("mode_filled_*")), key=lambda p: p.stat().st_mtime)
+                        # emb = adna.streaming_umap_from_parquet(latest_dir, n_components=2, max_cols=50000, pca_dim=50)
+                        # emb.to_pickle(processed_dir / f"target_matrix_{impute_method}_{reduce_method}_packed.pkl")
+                        emb = pd.read_pickle(processed_dir / f"target_matrix_{impute_method}_{reduce_method}_packed.pkl")
                         print(f"[OK] Lazy UMAP complete. Shape={emb.shape}")
                         # target_matrix = emb
 
@@ -107,12 +120,14 @@ def main():
                     # === 绘制降维结果 ===
                     if labels is not None:
 
-                        labels = labels.loc[Xf.index].reset_index(drop=True)
+                        # labels = labels.loc[Xf.index].reset_index(drop=True)  错误根源
+
+                        emb_clean, labels_clean = adna.clean_labels_and_align(emb, labels,collapse_y=False)
 
                         fig_path = results_dir / f"{impute_method}_embeddings_{reduce_method}_{labels.name}_packed.png"
-                        adna.plot_embedding(emb, labels=labels,
+                        adna.plot_embedding(emb_clean, labels=labels_clean,
                                             title=f"{reduce_method.upper()} ({impute_method}) Projection by {labels.name}",
-                                            save_path=fig_path)
+                                            save_path=fig_path,draw_others=False)
 
                     # === 层次聚类分析 ===
                     # invalid
