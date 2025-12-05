@@ -38,10 +38,10 @@ from pathlib import Path
 from matplotlib.colors import ListedColormap
 import numpy as np
 
-def plot_embedding( df: pd.DataFrame, labels: pd.Series | None = None, title: str = "Projection", save_path: str | Path | None = None, figsize: tuple = (10, 7), legend_pos: str = "right", cmap: str = "tab20", legend_max: int = 20, legend_sort: bool = True, others_color : tuple = (0.7, 0.7, 0.7, 0.5)) -> None:
+def plot_embedding( df: pd.DataFrame, labels: pd.Series | None = None, title: str = "Projection", save_path: str | Path | None = None, figsize: tuple = (10, 7), legend_pos: str = "right", cmap: str = "tab20", legend_max: int = 20, legend_sort: bool = True, others_color : tuple = (0.7, 0.7, 0.7, 0.5),draw_others: bool = False) -> None:
     """
-    绘制降维结果（支持 2D）
-    Plot 2D embedding projection with consistent color mapping.
+    绘制 2D / 3D 降维结果
+    Plot 2D or 3D embedding projection with optional categorical coloring.
 
     根据输入的二维降维结果与可选标签进行散点图绘制，
     支持类别排序、颜色映射、图例位置控制及保存导出。
@@ -88,6 +88,10 @@ def plot_embedding( df: pd.DataFrame, labels: pd.Series | None = None, title: st
         超出 legend 限制的类别所使用的灰色。
         Color for merged "others" classes.
 
+    :param draw_others: bool, default=True
+        是否绘制other类的点
+        Whether to draw points for "others" classes.
+
     说明 / Notes:
         - 图中散点与图例颜色保持一致。
           Scatter point colors match legend colors exactly.
@@ -98,67 +102,73 @@ def plot_embedding( df: pd.DataFrame, labels: pd.Series | None = None, title: st
         - 支持直接展示或保存为高分辨率 PNG。
           Supports direct display or high-resolution PNG export.
     """
-    fig, ax = plt.subplots(figsize=figsize)
+    # 判断是 2D 还是 3D
+    is_3d = "Dim3" in df.columns
 
+    # 初始化 figure
+    if is_3d:
+        fig = plt.figure(figsize=figsize)
+        ax = fig.add_subplot(111, projection="3d")
+    else:
+        fig, ax = plt.subplots(figsize=figsize)
+
+    # 如果有标签，执行颜色映射
     if labels is not None:
-        # ====== Step 1. 分类与排序 ======
-        categories = pd.Categorical(labels)
-        n_classes = len(categories.categories)
+        labels = labels.astype(str)
 
+        # 排序
         if legend_sort:
-            counts = pd.Series(categories).value_counts()
-            ordered_categories = counts.index.tolist()  # 按样本数降序
-            categories = pd.Categorical(labels, categories=ordered_categories, ordered=True)
+            counts = labels.value_counts()
+            ordered = counts.index.tolist()
         else:
-            ordered_categories = list(categories.categories)
+            ordered = labels.unique().tolist()
 
-        # ====== Step 2. 使用 tab20 颜色 ======
+        # 前 N 类 + others
+        main_classes = ordered[:legend_max]
+        other_classes = ordered[legend_max:]
+
+        # 获取 tab20 颜色
         base_cmap = get_cmap(cmap)
-        tab20_colors = [base_cmap(i / 19) for i in range(20)]  # tab20 自带 20 种颜色
+        main_colors = [base_cmap(i / max(1, legend_max - 1)) for i in range(len(main_classes))]
 
-        # ====== Step 3. 区分主要类别与 others ======
-        if n_classes > legend_max:
-            main_colors = tab20_colors[:legend_max]
-            mask_main = categories.codes < legend_max
-            # mask_others = ~mask_main
+        # class → color 映射
+        class_to_color = {cls: color for cls, color in zip(main_classes, main_colors)}
+        for cls in other_classes:
+            class_to_color[cls] = others_color
 
-            # 主类散点
+        # 是否过滤 others
+        if not draw_others:
+            mask = labels.isin(main_classes)
+            df = df[mask]
+            labels = labels[mask]
+
+        # 将颜色映射到每一个点
+        point_colors = labels.map(class_to_color)
+
+        # scatter 绘制
+        if is_3d:
             ax.scatter(
-                df.loc[mask_main, "Dim1"],
-                df.loc[mask_main, "Dim2"],
-                c=categories.codes[mask_main],
-                cmap=ListedColormap(main_colors),
-                s=20, alpha=0.5
+                df["Dim1"], df["Dim2"], df["Dim3"],
+                c=point_colors, s=18, alpha=0.7
             )
-
-            # 其他类灰色(此处注释掉使得不绘制灰色的点)
-            # ax.scatter(
-            #     df.loc[mask_others, "Dim1"],
-            #     df.loc[mask_others, "Dim2"],
-            #     color=others_color,
-            #     s=20, alpha=0.3
-            # )
-
-            display_classes = list(categories.categories[:legend_max]) + ["... (others)"]
-            display_colors = main_colors + [others_color]
-
         else:
-            main_colors = tab20_colors[:n_classes]
             ax.scatter(
                 df["Dim1"], df["Dim2"],
-                c=categories.codes,
-                cmap=ListedColormap(main_colors),
-                s=20, alpha=0.5
+                c=point_colors, s=20, alpha=0.65
             )
-            display_classes = categories.categories
-            display_colors = main_colors
 
-        # ====== Step 4. Legend 绘制 ======
-        legend_title = labels.name if labels.name else "Category"
+        # legend：如果不画 others，则不显示 "others"
+        if draw_others and other_classes:
+            legend_classes = main_classes + ["… (others)"]
+            legend_colors = main_colors + [others_color]
+        else:
+            legend_classes = main_classes
+            legend_colors = main_colors
+
         handles = [
-            mlines.Line2D([], [], color=display_colors[i], marker='o',
-                          linestyle='None', markersize=6)
-            for i in range(len(display_classes))
+            mlines.Line2D([], [], color=legend_colors[i], marker="o",
+                          linestyle="None", markersize=6)
+            for i in range(len(legend_classes))
         ]
 
         # 图例位置布局
@@ -173,33 +183,37 @@ def plot_embedding( df: pd.DataFrame, labels: pd.Series | None = None, title: st
         else:
             raise ValueError(f"Invalid legend_pos: {legend_pos}")
 
-        ax.legend(
-            handles,
-            display_classes,
-            title=legend_title,
-            loc=loc,
-            bbox_to_anchor=bbox,
-            frameon=False,
-            fontsize=9,
-            title_fontsize=10
-        )
+        ax.legend(handles, legend_classes, title=labels.name,
+                  loc=loc, bbox_to_anchor=bbox, frameon=False,
+                  fontsize=9, title_fontsize=10)
 
     else:
         # ====== 无标签情况 ======
-        ax.scatter(df["Dim1"], df["Dim2"], s=30, alpha=0.7, color="gray")
+        if is_3d:
+            ax.scatter(df["Dim1"], df["Dim2"], df["Dim3"],
+                       s=20, alpha=0.7, color="gray")
+        else:
+            ax.scatter(df["Dim1"], df["Dim2"],
+                       s=20, alpha=0.7, color="gray")
         rect = [0, 0, 1, 1]
 
     # ====== Step 5. 坐标轴与标题 ======
     ax.set_xlabel("Dim1")
     ax.set_ylabel("Dim2")
+    if is_3d:
+        ax.set_zlabel("Dim3")
     ax.set_title(title)
 
-    plt.tight_layout(rect = rect)
+    # 紧凑布局
+    if labels is not None:
+        plt.tight_layout(rect = rect)
+    else:
+        plt.tight_layout()
 
     # ====== Step 6. 保存或显示 ======
     if save_path:
         plt.savefig(save_path, dpi=300, bbox_inches="tight")
-        print(f"[OK] 二维图像已保存到 {save_path}")
+        print(f"[OK] saved → {save_path}")
     else:
         plt.show()
         print("[OK} 二维图像已展示")
