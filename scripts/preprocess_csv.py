@@ -254,7 +254,8 @@ def main():
     adna.plot_missing_values(X1,save_path=missing_path)
 
     sm, cm = adna.compute_missing_rates(X1)
-    Xf = adna.filter_by_missing(X1, sm, cm)
+    Xf, keep_rows = adna.filter_by_missing(X1, sm, cm)
+    metaf = adna.filter_meta_by_rows(meta1, keep_rows)
     missing_report = adna.build_missing_report(sm, cm)
     adna.save_report(missing_report, results_dir / "missing_report.csv")
 
@@ -269,13 +270,11 @@ def main():
     #     "Political Entity"
     # ]
     label_columns = [
-        "World Zone"
+        "Y haplogroup"
     ]
 
     # === 4. 需要测试的组合 ===
-    # impute_methods = ["mode", "mean", "knn","knn_hamming"]
-    # reduce_methods = ["umap", "tsne", "mds", "isomap"]
-    impute_methods = ['mode','knn_auto','knn_faiss']
+    impute_methods = ['knn_auto']
     reduce_methods = ["tsne"]
 
     runtime_records = []
@@ -284,10 +283,10 @@ def main():
     for impute_method in impute_methods:
         for reduce_method in reduce_methods:
             for label_col in label_columns:
-                labels = meta1[label_col] if label_col in meta1.columns else None
+                labels = metaf[label_col] if label_col in metaf.columns else None
                 record = run_impute_reduce_pipeline(
                     X=Xf,
-                    meta=meta1,
+                    meta=metaf,
                     impute_method=impute_method,
                     reduce_method=reduce_method,
                     labels=labels,
