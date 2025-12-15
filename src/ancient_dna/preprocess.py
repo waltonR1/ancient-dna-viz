@@ -1421,37 +1421,49 @@ def clean_labels_and_align(
 
 def _collapse_y_haplogroup(y: pd.Series) -> pd.Series:
     """
-    将 Y haplogroup 映射到大类（Macro Haplogroup）
-    Collapse detailed Y haplogroups to macro-level (first capital letter).
+    将 Y haplogroup 映射到“次级宏类”（字母 + 第一位数字）
+    Collapse detailed Y haplogroups to macro2-level (letter + first digit).
 
-    例如：
-        "R1b1a2"   → "R"
+    Examples / 示例:
+        "R1b1a2"   → "R1"
         "R-M269"   → "R"
-        "J2a1"     → "J"
-        "E1b1a"    → "E"
+        "I2a1"     → "I2"
+        "J2a1"     → "J2"
+        "E1b1a"    → "E1"
+        "C2a1"     → "C2"
 
-    说明:
-        - 此函数不会删除无效标签（如 n/a），clean_labels_and_align 会处理
-        - 仅对有效的 Y 值进行“取首字母大写”
+    Notes / 说明:
+        - 不负责删除无效值（如 n/a、..、unknown）
+          Invalid values are kept as-is and should be handled by
+          clean_labels_and_align().
+        - 仅对以字母开头的 haplogroup 进行解析
+        - 若无数字，则退化为单字母宏类（如 "R-M269" → "R")
     """
 
     y = y.astype(str).str.strip()
 
     macro = []
+
     for v in y:
         v = v.strip()
 
-        # 无效值（n/a, .., unknown）保持原样，由 clean() 去掉
-        if len(v) == 0:
+        # 空值：原样返回，由 clean_labels_and_align 统一过滤
+        if not v:
+            macro.append(v)
+            continue
+
+        # 必须以字母开头，否则原样返回
+        if not v[0].isalpha():
             macro.append(v)
             continue
 
         first = v[0].upper()
 
-        # 只对 alphabet 开头的 haplogroup 做宏类合并
-        if first.isalpha():
-            macro.append(first)
+        # 第二位是数字 → 字母 + 数字（R1, I2, N1）
+        if len(v) > 1 and v[1].isdigit():
+            macro.append(first + v[1])
         else:
-            macro.append(v)
+            # 没有数字 → 回退到单字母（R, J, E）
+            macro.append(first)
 
-    return pd.Series(macro, index=y.index, name=y.name + "_macro")
+    return pd.Series(macro, index=y.index, name=y.name + "_macro2")
