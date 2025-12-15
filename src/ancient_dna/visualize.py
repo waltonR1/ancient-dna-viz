@@ -38,6 +38,49 @@ from pathlib import Path
 from matplotlib.colors import ListedColormap
 import numpy as np
 
+def _categorical_color_mapping(
+    labels: pd.Series,
+    legend_max: int,
+    legend_sort: bool,
+    cmap: str,
+    others_color: tuple,
+):
+    """
+    Internal helper to assign categorical colors.
+
+    Returns
+    -------
+    class_to_color : dict
+    main_classes : list
+    other_classes : list
+    main_colors : list
+        Colors corresponding to main_classes (for legend use)
+    """
+    labels = labels.astype(str)
+
+    # 排序
+    if legend_sort:
+        ordered = labels.value_counts().index.tolist()
+    else:
+        ordered = labels.unique().tolist()
+
+    main_classes = ordered[:legend_max]
+    other_classes = ordered[legend_max:]
+
+    base_cmap = get_cmap(cmap)
+    main_colors = [
+        base_cmap(i / max(1, legend_max - 1))
+        for i in range(len(main_classes))
+    ]
+
+    class_to_color = dict(zip(main_classes, main_colors))
+    for cls in other_classes:
+        class_to_color[cls] = others_color
+
+    return class_to_color, main_classes, other_classes, main_colors
+
+
+
 def plot_embedding( df: pd.DataFrame, labels: pd.Series | None = None, title: str = "Projection", save_path: str | Path | None = None, figsize: tuple = (10, 7), legend_pos: str = "right", cmap: str = "tab20", legend_max: int = 20, legend_sort: bool = True, others_color : tuple = (0.7, 0.7, 0.7, 0.5),draw_others: bool = False) -> None:
     """
     绘制 2D / 3D 降维结果
@@ -114,27 +157,13 @@ def plot_embedding( df: pd.DataFrame, labels: pd.Series | None = None, title: st
 
     # 如果有标签，执行颜色映射
     if labels is not None:
-        labels = labels.astype(str)
-
-        # 排序
-        if legend_sort:
-            counts = labels.value_counts()
-            ordered = counts.index.tolist()
-        else:
-            ordered = labels.unique().tolist()
-
-        # 前 N 类 + others
-        main_classes = ordered[:legend_max]
-        other_classes = ordered[legend_max:]
-
-        # 获取 tab20 颜色
-        base_cmap = get_cmap(cmap)
-        main_colors = [base_cmap(i / max(1, legend_max - 1)) for i in range(len(main_classes))]
-
-        # class → color 映射
-        class_to_color = {cls: color for cls, color in zip(main_classes, main_colors)}
-        for cls in other_classes:
-            class_to_color[cls] = others_color
+        class_to_color, main_classes, other_classes, main_colors = _categorical_color_mapping(
+                labels=labels,
+                legend_max=legend_max,
+                legend_sort=legend_sort,
+                cmap=cmap,
+                others_color=others_color,
+            )
 
         # 是否过滤 others
         if not draw_others:
