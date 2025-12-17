@@ -37,28 +37,31 @@ import matplotlib.lines as mlines
 from pathlib import Path
 from matplotlib.colors import ListedColormap
 import numpy as np
+from collections import defaultdict
+import plotly.graph_objects as go
 
-def _categorical_color_mapping(
-    labels: pd.Series,
-    legend_max: int,
-    legend_sort: bool,
-    cmap: str,
-    others_color: tuple,
-):
-    """
-    Internal helper to assign categorical colors.
+_WORLD_ZONE_CMAPS = {
+    "Europe": get_cmap("Blues"),
+    "Asia": get_cmap("Greens"),
+    "Africa": get_cmap("YlOrBr"),
+    "America": get_cmap("Reds"),
+    "Oceania": get_cmap("Purples"),
+    "Middle East": get_cmap("Oranges"),
+}
 
-    Returns
-    -------
-    class_to_color : dict
-    main_classes : list
-    other_classes : list
-    main_colors : list
-        Colors corresponding to main_classes (for legend use)
-    """
+_WORLD_ZONE_ORDER = [
+    "Europe",
+    "Asia",
+    "Middle East",
+    "Africa",
+    "America",
+    "Oceania",
+]
+
+def _categorical_color_mapping(labels: pd.Series, legend_max: int, legend_sort: bool, cmap: str, others_color: tuple):
     labels = labels.astype(str)
 
-    # 排序
+    # 原始排序
     if legend_sort:
         ordered = labels.value_counts().index.tolist()
     else:
@@ -67,18 +70,53 @@ def _categorical_color_mapping(
     main_classes = ordered[:legend_max]
     other_classes = ordered[legend_max:]
 
-    base_cmap = get_cmap(cmap)
-    main_colors = [
-        base_cmap(i / max(1, legend_max - 1))
-        for i in range(len(main_classes))
-    ]
+    # 判断语义类型
+    sample = pd.Series(main_classes)
 
-    class_to_color = dict(zip(main_classes, main_colors))
+    is_world_zone = sample.str.startswith(tuple(_WORLD_ZONE_CMAPS)).mean() > 0.6
+
+    class_to_color = {}
+    main_colors = []
+
+    # World Zone 语义映射
+    if is_world_zone:
+        groups = defaultdict(list)
+        for cls in main_classes:
+            for cont in _WORLD_ZONE_ORDER:
+                if cls.startswith(cont):
+                    groups[cont].append(cls)
+                    break
+            else:
+                groups["Other"].append(cls)
+
+        main_classes = []
+        for cont in _WORLD_ZONE_ORDER + ["Other"]:
+            if cont not in groups:
+                continue
+            classes = sorted(groups[cont])
+            cmap_cont = _WORLD_ZONE_CMAPS.get(cont, get_cmap(cmap))
+            shades = np.linspace(0.4, 0.85, len(classes))
+
+            for cls, shade in zip(classes, shades):
+                color = cmap_cont(shade)
+                class_to_color[cls] = color
+                main_classes.append(cls)
+                main_colors.append(color)
+
+    # 普通 categorical
+    else:
+        base_cmap = get_cmap(cmap)
+        main_colors = [
+            base_cmap(i / max(1, len(main_classes) - 1))
+            for i in range(len(main_classes))
+        ]
+        class_to_color = dict(zip(main_classes, main_colors))
+
+    # ===== Step 3: others =====
     for cls in other_classes:
         class_to_color[cls] = others_color
 
     return class_to_color, main_classes, other_classes, main_colors
-
 
 
 def plot_embedding( df: pd.DataFrame, labels: pd.Series | None = None, title: str = "Projection", save_path: str | Path | None = None, figsize: tuple = (10, 7), legend_pos: str = "right", cmap: str = "tab20", legend_max: int = 20, legend_sort: bool = True, others_color : tuple = (0.7, 0.7, 0.7, 0.5),draw_others: bool = False) -> None:
@@ -172,7 +210,7 @@ def plot_embedding( df: pd.DataFrame, labels: pd.Series | None = None, title: st
             labels = labels[mask]
 
         # 将颜色映射到每一个点
-        point_colors = labels.map(class_to_color)
+        point_colors = labels.astype(str).map(class_to_color)
 
         # scatter 绘制
         if is_3d:
@@ -245,7 +283,7 @@ def plot_embedding( df: pd.DataFrame, labels: pd.Series | None = None, title: st
         print(f"[OK] saved → {save_path}")
     else:
         plt.show()
-        print("[OK} 二维图像已展示")
+        print("[OK} Figure shown interactively.")
 
     plt.close(fig)
 
