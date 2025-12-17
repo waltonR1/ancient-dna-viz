@@ -288,6 +288,163 @@ def plot_embedding( df: pd.DataFrame, labels: pd.Series | None = None, title: st
     plt.close(fig)
 
 
+def plot_embedding_interactive(
+    df: pd.DataFrame,
+    labels: pd.Series,
+    dim: int | None = None,
+    title: str = "Projection",
+    legend_max: int = 20,
+    legend_sort: bool = False,
+    cmap: str = "tab20",
+    others_color: tuple = (0.7, 0.7, 0.7, 0.5),
+    show: bool = True,
+    save_path: str | Path | None = None,
+):
+    """
+    Interactive embedding visualization using Plotly.
+
+    Supports:
+    - 2D and 3D embedding
+    - Interactive legend (click to hide/show categories)
+    - Zoom / pan (2D)
+    - Rotate / zoom (3D)
+    - Reuses the same categorical color mapping as matplotlib version
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        Embedding dataframe, must contain Dim1, Dim2 (and Dim3 if dim=3).
+
+    labels : pd.Series
+        Categorical labels for coloring.
+
+    dim : int, default=2
+        Dimension of embedding (2 or 3).
+
+    title : str
+        Plot title.
+
+    legend_max : int
+        Maximum number of legend classes.
+
+    legend_sort : bool
+        Whether to sort classes (passed to color mapping).
+
+    cmap : str
+        Fallback colormap name.
+
+    others_color : tuple
+        RGBA color for merged "others".
+
+    show : bool
+        Whether to show the figure immediately.
+
+    save_path : str | Path | None
+        If provided, save the figure as HTML.
+    """
+    if dim is None:
+        dim = 3 if "Dim3" in df.columns else 2
+
+    labels = labels.astype(str)
+
+    # ===== Step 1: reuse categorical color mapping =====
+    class_to_color, main_classes, other_classes, _ = _categorical_color_mapping(
+        labels=labels,
+        legend_max=legend_max,
+        legend_sort=legend_sort,
+        cmap=cmap,
+        others_color=others_color,
+    )
+
+    fig = go.Figure()
+
+    # ===== Step 2: one trace per class (key for interactive legend) =====
+    for cls in main_classes:
+        mask = labels == cls
+        color = class_to_color[cls]
+
+        # Convert RGBA (0–1) to CSS rgba string
+        rgba = f"rgba({int(color[0]*255)}, {int(color[1]*255)}, {int(color[2]*255)}, {color[3]})"
+
+        if dim == 2:
+            fig.add_trace(
+                go.Scatter(
+                    x=df.loc[mask, "Dim1"],
+                    y=df.loc[mask, "Dim2"],
+                    mode="markers",
+                    name=cls,
+                    marker=dict(color=rgba, size=6),
+                )
+            )
+        else:
+            fig.add_trace(
+                go.Scatter3d(
+                    x=df.loc[mask, "Dim1"],
+                    y=df.loc[mask, "Dim2"],
+                    z=df.loc[mask, "Dim3"],
+                    mode="markers",
+                    name=cls,
+                    marker=dict(color=rgba, size=4),
+                )
+            )
+
+    # ===== Step 3: others =====
+    if other_classes:
+        mask = labels.isin(other_classes)
+        rgba = f"rgba({int(others_color[0]*255)}, {int(others_color[1]*255)}, {int(others_color[2]*255)}, {others_color[3]})"
+
+        if dim == 2:
+            fig.add_trace(
+                go.Scatter(
+                    x=df.loc[mask, "Dim1"],
+                    y=df.loc[mask, "Dim2"],
+                    mode="markers",
+                    name="… (others)",
+                    marker=dict(color=rgba, size=5),
+                )
+            )
+        else:
+            fig.add_trace(
+                go.Scatter3d(
+                    x=df.loc[mask, "Dim1"],
+                    y=df.loc[mask, "Dim2"],
+                    z=df.loc[mask, "Dim3"],
+                    mode="markers",
+                    name="… (others)",
+                    marker=dict(color=rgba, size=4),
+                )
+            )
+
+    # ===== Step 4: layout =====
+    if dim == 2:
+        fig.update_layout(
+            title=title,
+            xaxis_title="Dim1",
+            yaxis_title="Dim2",
+            legend=dict(itemsizing="constant"),
+        )
+    else:
+        fig.update_layout(
+            title=title,
+            scene=dict(
+                xaxis_title="Dim1",
+                yaxis_title="Dim2",
+                zaxis_title="Dim3",
+            ),
+            legend=dict(itemsizing="constant"),
+        )
+
+    # ===== Step 5: output =====
+    if save_path:
+        fig.write_html(str(save_path))
+        print(f"[OK] Interactive figure saved → {save_path}")
+
+    if show:
+        fig.show()
+
+    return fig
+
+
 def plot_missing_values(df: pd.DataFrame, save_path: str | Path | None = None, missing_value: int = 3, figsize: tuple = (20, 10), cmap_present: str = "#d95f02", cmap_missing: str = "#ffffff", show_ratio: bool = True, max_pixels: int = 5e7) -> None:
     """
     智能绘制缺失数据可视化图
