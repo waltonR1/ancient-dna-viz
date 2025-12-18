@@ -144,7 +144,7 @@ def run_impute_reduce_pipeline(X, meta, impute_method, reduce_method, labels, pr
         print("\n[INFO] Running hierarchical clustering analysis...")
 
         if auto_cluster:
-            best_k, scores = adna.find_optimal_clusters(Xi, linkage_method="average", metric="hamming", cluster_range=range(2, 10))
+            best_k, scores = adna.find_optimal_clusters_embedding(embeddings, linkage_method="average", metric="euclidean", cluster_range=range(2, 10))
             silhouette_plot_path = results_dir / f"{impute_method}_{reduce_method}_silhouette_trend.png"
             adna.plot_silhouette_trend(scores, save_path=silhouette_plot_path)
             print(f"[INFO] Using optimal cluster number: {best_k}")
@@ -152,19 +152,19 @@ def run_impute_reduce_pipeline(X, meta, impute_method, reduce_method, labels, pr
             best_k = 10
 
         # 高维聚类
-        meta_hd = adna.cluster_high_dimensional(Xi, meta.copy(), n_clusters=best_k)
-        adna.save_csv(meta_hd, results_dir / f"{impute_method}_highdim_clusters.csv")
+        # meta_hd = adna.cluster_high_dimensional(Xi, meta.copy(), n_clusters=best_k)
+        # adna.save_csv(meta_hd, results_dir / f"{impute_method}_highdim_clusters.csv")
 
         # 降维结果聚类
-        meta_2d = adna.cluster_on_embedding(embeddings, meta.copy(), n_clusters=best_k)
-        adna.save_csv(meta_2d, results_dir / f"{impute_method}_{reduce_method}_2D_clusters.csv")
+        meta_cluster = adna.cluster_on_embedding(embeddings, meta.copy(), n_clusters=best_k)
+        adna.save_csv(meta_cluster, results_dir / f"{impute_method}_{reduce_method}_clusters.csv")
 
         # 聚类可视化
-        cluster_fig_path = results_dir / f"{impute_method}_{reduce_method}_2D_clusters.png"
+        cluster_fig_path = results_dir / f"{impute_method}_{reduce_method}_clusters.png"
         adna.plot_cluster_on_embedding(
             embeddings,
-            labels=meta_2d["cluster_2D"],
-            meta=meta_2d,
+            labels=meta_cluster["cluster"],
+            meta=meta_cluster,
             label_col="World Zone",
             title=f"{reduce_method.upper()} + Hierarchical Clustering ({impute_method}) [k={best_k}]",
             figsize=(8, 6),
@@ -176,7 +176,7 @@ def run_impute_reduce_pipeline(X, meta, impute_method, reduce_method, labels, pr
         if enable_cluster_label_analysis:
             try:
                 summary_df = adna.compare_clusters_vs_labels(
-                    meta_2d, cluster_col="cluster_2D", label_col="World Zone"
+                    meta_cluster, cluster_col="cluster", label_col="World Zone"
                 )
                 adna.save_report(
                     summary_df,
@@ -270,7 +270,7 @@ def main():
     #     "Political Entity"
     # ]
     label_columns = [
-        "Y haplogroup"
+        "World Zone"
     ]
 
     # === 4. 需要测试的组合 ===

@@ -39,7 +39,7 @@ from sklearn.metrics import silhouette_score
 from tqdm import tqdm
 
 
-def find_optimal_clusters(X: pd.DataFrame, linkage_method: str = "average", metric: str = "hamming", cluster_range: range = range(2, 11)) -> tuple[int, list[tuple[int, float]]]:
+def find_optimal_clusters_embedding(X: pd.DataFrame, linkage_method: str = "average", metric: str = "euclidean", cluster_range: range = range(2, 11)) -> tuple[int, list[tuple[int, float]]]:
     """
     自动搜索最佳聚类数（基于 Silhouette Score）
     Automatically determine the optimal number of clusters based on silhouette scores.
@@ -53,8 +53,8 @@ def find_optimal_clusters(X: pd.DataFrame, linkage_method: str = "average", metr
         Linkage method (default "average").
 
     :param metric: str
-        距离度量方式（默认 "hamming"）。
-        Distance metric (default "hamming").
+        距离度量方式（默认 "euclidean"）。
+        Distance metric (default "euclidean").
 
     :param cluster_range: range
         搜索聚类数范围（默认 2~10）。
@@ -130,6 +130,10 @@ def _run_hierarchical_clustering(X: pd.DataFrame, n_clusters: int = 5, linkage_m
           silhouette_score evaluates cluster separation quality.
     """
     print(f"[INFO] Hierarchical clustering — linkage={linkage_method}, metric={metric}")
+
+    if linkage_method == "ward" and metric != "euclidean":
+        raise ValueError("Ward linkage requires euclidean distance.")
+
     if isinstance(X, pd.DataFrame):
         X_np = X.to_numpy(dtype=np.float32)
     else:
@@ -181,6 +185,8 @@ def cluster_high_dimensional(X_imputed: pd.DataFrame, meta: pd.DataFrame, n_clus
         - 可用于与地理/种群标签对比分析。
           Useful for comparing against population or regional labels.
     """
+    if X_imputed.shape[0] > 2000:
+        print("[WARN] High-dimensional clustering may be very slow for large datasets.")
     labels, score = _run_hierarchical_clustering(X_imputed, n_clusters=n_clusters, plot=False)
     meta["cluster"] = labels.values
     score_str = f"{score:.3f}" if score is not None else "N/A"
@@ -203,8 +209,8 @@ def cluster_on_embedding(embedding_df: pd.DataFrame, meta: pd.DataFrame, n_clust
         聚类数。Number of clusters.
 
     :return: pd.DataFrame
-        更新后的 meta 表，包含 “cluster_2D”。
-        Updated metadata table including “cluster_2D”.
+        更新后的 meta 表，包含 “cluster”。
+        Updated metadata table including “cluster”
 
     说明 / Notes:
         - 在降维结果基础上执行层次聚类。
@@ -214,11 +220,12 @@ def cluster_on_embedding(embedding_df: pd.DataFrame, meta: pd.DataFrame, n_clust
         - 输出与原 meta 表顺序一致。
           Output order matches original metadata.
     """
-    labels, score = _run_hierarchical_clustering(embedding_df, n_clusters=n_clusters, plot=False)
-    meta["cluster_2D"] = labels.values
+    meta_aligned = meta.loc[embedding_df.index].copy()
+    labels, score = _run_hierarchical_clustering(embedding_df, n_clusters=n_clusters, linkage_method="ward", metric="euclidean", plot=False)
+    meta_aligned["cluster"] = labels
     score_str = f"{score:.3f}" if score is not None else "N/A"
     print(f"[OK] Embedding-space clustering complete — clusters={n_clusters}, silhouette={score_str}")
-    return meta
+    return meta_aligned
 
 
 def compare_clusters_vs_labels(meta: pd.DataFrame, cluster_col: str = "cluster_2D", label_col: str = "World Zone") -> pd.DataFrame:

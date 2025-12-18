@@ -255,7 +255,7 @@ def plot_embedding( df: pd.DataFrame, labels: pd.Series | None = None, title: st
                   fontsize=9, title_fontsize=10)
 
     else:
-        # ====== 无标签情况 ======
+        # 无标签情况
         if is_3d:
             ax.scatter(df["Dim1"], df["Dim2"], df["Dim3"],
                        s=20, alpha=0.7, color="gray")
@@ -264,7 +264,7 @@ def plot_embedding( df: pd.DataFrame, labels: pd.Series | None = None, title: st
                        s=20, alpha=0.7, color="gray")
         rect = [0, 0, 1, 1]
 
-    # ====== Step 5. 坐标轴与标题 ======
+    # 坐标轴与标题
     ax.set_xlabel("Dim1")
     ax.set_ylabel("Dim2")
     if is_3d:
@@ -277,7 +277,7 @@ def plot_embedding( df: pd.DataFrame, labels: pd.Series | None = None, title: st
     else:
         plt.tight_layout()
 
-    # ====== Step 6. 保存或显示 ======
+    # =保存或显示
     if save_path:
         plt.savefig(save_path, dpi=300, bbox_inches="tight")
         print(f"[OK] saved → {save_path}")
@@ -297,7 +297,6 @@ def plot_embedding_interactive(
     legend_sort: bool = False,
     cmap: str = "tab20",
     others_color: tuple = (0.7, 0.7, 0.7, 0.5),
-    show: bool = True,
     save_path: str | Path | None = None,
 ):
     """
@@ -336,9 +335,6 @@ def plot_embedding_interactive(
     others_color : tuple
         RGBA color for merged "others".
 
-    show : bool
-        Whether to show the figure immediately.
-
     save_path : str | Path | None
         If provided, save the figure as HTML.
     """
@@ -347,7 +343,7 @@ def plot_embedding_interactive(
 
     labels = labels.astype(str)
 
-    # ===== Step 1: reuse categorical color mapping =====
+    # Reuse categorical color mapping
     class_to_color, main_classes, other_classes, _ = _categorical_color_mapping(
         labels=labels,
         legend_max=legend_max,
@@ -358,7 +354,7 @@ def plot_embedding_interactive(
 
     fig = go.Figure()
 
-    # ===== Step 2: one trace per class (key for interactive legend) =====
+    # One trace per class (key for interactive legend)
     for cls in main_classes:
         mask = labels == cls
         color = class_to_color[cls]
@@ -388,7 +384,7 @@ def plot_embedding_interactive(
                 )
             )
 
-    # ===== Step 3: others =====
+    # Others
     if other_classes:
         mask = labels.isin(other_classes)
         rgba = f"rgba({int(others_color[0]*255)}, {int(others_color[1]*255)}, {int(others_color[2]*255)}, {others_color[3]})"
@@ -415,7 +411,7 @@ def plot_embedding_interactive(
                 )
             )
 
-    # ===== Step 4: layout =====
+    # Layout
     if dim == 2:
         fig.update_layout(
             title=title,
@@ -434,13 +430,13 @@ def plot_embedding_interactive(
             legend=dict(itemsizing="constant"),
         )
 
-    # ===== Step 5: output =====
+    # Output
     if save_path:
         fig.write_html(str(save_path))
         print(f"[OK] Interactive figure saved → {save_path}")
-
-    if show:
+    else:
         fig.show()
+        print("[OK} Figure shown interactively.")
 
     return fig
 
@@ -633,7 +629,7 @@ def plot_cluster_on_embedding( embedding_df: pd.DataFrame, labels: pd.Series, me
     # ====== 在簇中心标注 dominant label + purity ======
     if meta is not None and label_col in meta.columns:
         meta = meta.copy()
-        meta["cluster_2D"] = labels.values
+        meta["cluster"] = labels.values
 
         # 计算簇中心坐标
         group_centers = (
@@ -644,7 +640,7 @@ def plot_cluster_on_embedding( embedding_df: pd.DataFrame, labels: pd.Series, me
 
         # 计算每簇主标签及纯度
         cluster_stats = (
-            meta.groupby(["cluster_2D", label_col])
+            meta.groupby(["cluster", label_col])
             .size()
             .unstack(fill_value=0)
         )

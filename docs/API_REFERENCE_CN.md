@@ -75,7 +75,7 @@
 
 ```python
 import pandas as pd
-from ancient_dna import find_optimal_clusters
+from ancient_dna import find_optimal_clusters_embedding
 
 # 示例输入
 X = pd.DataFrame({
@@ -84,7 +84,7 @@ X = pd.DataFrame({
     "SNP3": [3, 3, 1, 0]
 })
 
-best_k, scores = find_optimal_clusters(X, linkage_method="average", metric="hamming")
+best_k, scores = find_optimal_clusters_embedding(X, linkage_method="average", metric="hamming")
 
 print("最佳聚类数:", best_k)
 print("轮廓系数结果:", scores)

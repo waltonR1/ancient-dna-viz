@@ -129,23 +129,23 @@ def main():
                             save_path=html_path,
                         )
 
-                    # === 层次聚类分析 ===
-                    # invalid
-                    # print("\n[INFO] Running hierarchical clustering analysis...")
-                    # best_k, _ = adna.find_optimal_clusters(target_matrix, linkage_method="average",
-                    #                                     metric="hamming", cluster_range=range(2, 9))
-                    # print(f"[INFO] Using optimal cluster number: {best_k}")
-                    #
-                    # meta_2d = adna.cluster_on_embedding(emb, meta.copy(), n_clusters=best_k)
-                    # adna.save_csv(meta_2d, results_dir / f"{impute_method}_{reduce_method}_2D_clusters_packed.csv")
-                    #
-                    # adna.plot_cluster_on_embedding(
-                    #     emb, labels=meta_2d["cluster_2D"], meta=meta_2d, label_col="World Zone",
-                    #     title=f"{reduce_method.upper()} + Clustering ({impute_method}) [k={best_k}]"
-                    # )
-                    #
-                    # summary_df = adna.compare_clusters_vs_labels(meta_2d, cluster_col="cluster_2D", label_col="World Zone")
-                    # adna.save_report(summary_df, results_dir / f"{impute_method}_{reduce_method}_cluster_vs_label_packed.csv")
+                        # === 层次聚类分析 ===
+                        print("\n[INFO] Running hierarchical clustering analysis...")
+                        best_k, scores = adna.find_optimal_clusters_embedding(emb_clean, linkage_method="average", metric="euclidean", cluster_range=range(2, 9))
+                        silhouette_plot_path = results_dir / f"{impute_method}_{reduce_method}_silhouette_trend.png"
+                        adna.plot_silhouette_trend(scores, save_path=silhouette_plot_path)
+                        print(f"[INFO] Using optimal cluster number: {best_k}")
+
+                        meta_cluster = adna.cluster_on_embedding(emb_clean, metaf.copy(), n_clusters=best_k)
+                        adna.save_csv(meta_cluster, results_dir / f"{impute_method}_{reduce_method}_clusters_packed.csv")
+
+                        adna.plot_cluster_on_embedding(
+                            emb_clean, labels=meta_cluster["cluster"], meta=meta_cluster, label_col=labels.name,
+                            title=f"{reduce_method.upper()} + Clustering ({impute_method}) [k={best_k}]"
+                        )
+
+                        summary_df = adna.compare_clusters_vs_labels(meta_cluster, cluster_col="cluster", label_col=labels.name)
+                        adna.save_report(summary_df, results_dir / f"{impute_method}_{reduce_method}_cluster_vs_label_packed.csv")
 
                     runtime_records.append({
                         "imputation_method": impute_method,

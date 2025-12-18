@@ -75,7 +75,7 @@ By iterating over different numbers of clusters `k`, it calculates the average s
 
 ```python
 import pandas as pd
-from ancient_dna import find_optimal_clusters
+from ancient_dna import find_optimal_clusters_embedding
 
 # Example input
 X = pd.DataFrame({
@@ -84,7 +84,7 @@ X = pd.DataFrame({
     "SNP3": [3, 3, 1, 0]
 })
 
-best_k, scores = find_optimal_clusters(X, linkage_method="average", metric="hamming")
+best_k, scores = find_optimal_clusters_embedding(X, linkage_method="average", metric="hamming")
 
 print("Optimal cluster number:", best_k)
 print("Silhouette score results:", scores)
