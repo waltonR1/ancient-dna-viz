@@ -102,7 +102,6 @@ def run_impute_reduce_pipeline(X, meta, impute_method, reduce_method, labels, pr
     # 1. 缺失值填补
     start_impute = time.time()
     Xi = adna.impute_missing(X, method=impute_method)
-    # Xi = adna.grouped_imputation(X, labels, method=impute_method)
     impute_elapsed = round(time.time() - start_impute, 3)
     print(f"[OK] Imputation ({impute_method}) completed in {impute_elapsed:.2f}s")
 
@@ -301,8 +300,8 @@ def main():
         print("\n")
         adna.save_runtime_report(runtime_records, runtime_path)
 
-    print("\n[ALL DONE] 所有组合已执行完成！")
-    print(f"[PATH] 查看结果目录: {results_dir}")
+    print("\n[ALL DONE] All operations have been completed!")
+    print(f"[PATH] View Results Directory: {results_dir}")
 
 
 if __name__ == "__main__":
