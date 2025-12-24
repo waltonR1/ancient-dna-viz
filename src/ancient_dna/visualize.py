@@ -43,10 +43,10 @@ import plotly.graph_objects as go
 _WORLD_ZONE_CMAPS = {
     "Europe": get_cmap("Blues"),
     "Asia": get_cmap("Greens"),
-    "Africa": get_cmap("YlOrBr"),
+    "Africa": get_cmap("Purples"),
     "America": get_cmap("Reds"),
-    "Oceania": get_cmap("Purples"),
-    "Middle East": get_cmap("Oranges"),
+    "Oceania": get_cmap("vanimo"),
+    "Middle East": get_cmap("Greys"),
 }
 
 _WORLD_ZONE_ORDER = [
@@ -58,61 +58,93 @@ _WORLD_ZONE_ORDER = [
     "Oceania",
 ]
 
-def _categorical_color_mapping(labels: pd.Series, legend_max: int, legend_sort: bool, cmap: str, others_color: tuple):
+def _is_world_zone_labels(classes: list[str]) -> bool:
+    """
+    判断 labels 是否属于 World Zone 语义
+    """
+    if not classes:
+        return False
+    return sum(
+        any(cls.startswith(cont) for cont in _WORLD_ZONE_CMAPS)
+        for cls in classes
+    ) / len(classes) >= 0.6
+
+
+def _group_by_world_zone(classes: list[str]) -> dict[str, list[str]]:
+    """
+    将标签按 World Zone 分组
+    """
+    groups = defaultdict(list)
+
+    for cls in classes:
+        matched = False
+        for cont in _WORLD_ZONE_ORDER:
+            if cls.startswith(cont):
+                groups[cont].append(cls)
+                matched = True
+                break
+        if not matched:
+            groups["Other"].append(cls)
+
+    return groups
+
+
+def _categorical_color_mapping(
+    labels: pd.Series,
+    legend_max: int = 20,
+    legend_sort: bool = True,
+    cmap: str = "tab20",
+    others_color: tuple = (0.8, 0.8, 0.8, 1.0),
+    shade_range: tuple = (0.4, 0.85),
+):
     labels = labels.astype(str)
 
-    # 原始排序
-    if legend_sort:
-        ordered = labels.value_counts().index.tolist()
-    else:
-        ordered = labels.unique().tolist()
+    # 排序
+    ordered = (
+        labels.value_counts().index.tolist()
+        if legend_sort
+        else labels.unique().tolist()
+    )
 
     main_classes = ordered[:legend_max]
     other_classes = ordered[legend_max:]
 
-    # 判断语义类型
-    sample = pd.Series(main_classes)
-
-    is_world_zone = sample.str.startswith(tuple(_WORLD_ZONE_CMAPS)).mean() > 0.6
-
     class_to_color = {}
-    main_colors = []
 
-    # World Zone 语义映射
-    if is_world_zone:
-        groups = defaultdict(list)
-        for cls in main_classes:
-            for cont in _WORLD_ZONE_ORDER:
-                if cls.startswith(cont):
-                    groups[cont].append(cls)
-                    break
-            else:
-                groups["Other"].append(cls)
+    # World Zone 语义
+    if _is_world_zone_labels(main_classes):
+        groups = _group_by_world_zone(main_classes)
 
-        main_classes = []
+        ordered_main = []
+        main_colors = []
+
         for cont in _WORLD_ZONE_ORDER + ["Other"]:
             if cont not in groups:
                 continue
+
             classes = sorted(groups[cont])
             cmap_cont = _WORLD_ZONE_CMAPS.get(cont, get_cmap(cmap))
-            shades = np.linspace(0.4, 0.85, len(classes))
+            shades = np.linspace(*shade_range, len(classes))
 
             for cls, shade in zip(classes, shades):
                 color = cmap_cont(shade)
                 class_to_color[cls] = color
-                main_classes.append(cls)
+                ordered_main.append(cls)
                 main_colors.append(color)
+
+        main_classes = ordered_main
 
     # 普通 categorical
     else:
         base_cmap = get_cmap(cmap)
-        main_colors = [
+        colors = [
             base_cmap(i / max(1, len(main_classes) - 1))
             for i in range(len(main_classes))
         ]
-        class_to_color = dict(zip(main_classes, main_colors))
+        class_to_color.update(dict(zip(main_classes, colors)))
+        main_colors = colors
 
-    # ===== Step 3: others =====
+    # Others
     for cls in other_classes:
         class_to_color[cls] = others_color
 
