@@ -1,33 +1,45 @@
 """
 summary.py
------------------
-报告生成与导出模块
+==========
+
+报告生成与导出模块（Reporting Layer）
 Report generation and export module.
 
-用于生成与保存数据处理过程中的各类分析报告，
-包括缺失率报告、降维结果报告以及运行时间报告。
-Provides utilities to build and export analytical reports such as
-missing rate summaries, embedding statistics, and runtime performance logs.
+本模块用于生成并导出数据处理流程中的各类分析报告，
+包括缺失率统计、降维嵌入数值分布以及算法运行时间摘要。
 
-功能 / Functions:
-    - build_missing_report(): 生成样本与 SNP 缺失率统计报告；
-      Build a summary report for sample- and SNP-level missingness.
-    - build_embedding_report(): 生成降维嵌入的数值分布报告；
-      Build a statistical report for embedding dimensions.
-    - save_report(): 通用报告保存函数（CSV 导出）；
-      Save any report DataFrame as a UTF-8 CSV file.
-    - save_runtime_report(): 保存运行时间报告（runtime_summary.csv）。
-      Save algorithm runtime summary as a CSV file.
+This module provides utilities to generate and export analytical
+reports produced during the data processing pipeline, including
+missing-rate summaries, embedding statistics, and runtime logs.
 
-说明 / Description:
-    本模块是分析管线的“报告层”（Reporting Layer），
-    用于整合、统计与导出数据质量和模型性能结果。
-    可与 preprocess、embedding、clustering 模块协同使用，
-    为整个数据处理工作流提供可追踪、可审计的输出。
-    This module serves as the "Reporting Layer" of the pipeline,
-    consolidating, summarizing, and exporting quality and performance metrics.
-    It works in conjunction with preprocess, embedding, and clustering modules,
-    providing traceable and auditable outputs across the data workflow.
+Functions
+---------
+build_missing_report
+    生成样本级与 SNP 级缺失率的统计汇总报告。
+    Build a summary report of sample- and SNP-level missingness.
+
+build_embedding_report
+    生成降维嵌入结果的数值分布统计报告。
+    Build a statistical summary for embedding dimensions.
+
+save_report
+    通用报告保存函数（CSV 导出）。
+    Save a report DataFrame as a CSV file.
+
+save_runtime_report
+    保存算法运行时间的汇总报告。
+    Save runtime summary records as a CSV file.
+
+Description
+-----------
+本模块是分析管线的“报告层（Reporting Layer）”，
+负责对 preprocess、embedding、clustering 等模块
+产生的中间结果进行汇总、统计与持久化。
+
+This module serves as the reporting layer of the pipeline,
+consolidating, summarizing, and exporting results produced
+by preprocess, embedding, and clustering stages, and providing
+traceable, auditable outputs for downstream analysis.
 """
 
 import pandas as pd
@@ -35,36 +47,59 @@ from pathlib import Path
 from ancient_dna import save_csv
 
 
-def build_missing_report(sample_missing: pd.Series, snp_missing: pd.Series) -> pd.DataFrame:
+def build_missing_report(
+        sample_missing: pd.Series,
+        snp_missing: pd.Series
+) -> pd.DataFrame:
     """
     生成缺失率汇总报告
+
     Build a summary report of missing rates.
 
-    根据样本维度与 SNP 维度的缺失率计算描述性统计，
-    输出包含样本数量、SNP 数量、均值、中位数及最大值的单行报告表。
-    Computes descriptive statistics (mean, median, max) of missing rates
-    at both the sample and SNP levels, returning a one-row summary DataFrame.
+    本函数根据样本维度与 SNP 维度的缺失率，
+    计算描述性统计指标，并返回一个单行汇总表，
+    用于概览数据的缺失情况。
 
-    :param sample_missing: pd.Series
+    This function computes descriptive statistics of missing
+    rates at both the sample and SNP levels and returns a
+    single-row summary DataFrame.
+
+    Parameters
+    ----------
+    sample_missing : pandas.Series
         每个样本的缺失率。
+
         Missing rate per sample.
 
-    :param snp_missing: pd.Series
+    snp_missing : pandas.Series
         每个 SNP 的缺失率。
+
         Missing rate per SNP.
 
-    :return: pd.DataFrame
-        单行汇总表，包含样本与 SNP 层面的缺失率统计。
-        One-row DataFrame summarizing missing rate statistics.
+    Returns
+    -------
+    pandas.DataFrame
+        单行汇总表，包含样本与 SNP 层面的
+        缺失率统计信息。
 
-    说明 / Notes:
-        - 汇总样本级与位点级缺失率指标；
-          Summarizes missingness at both sample and site levels.
-        - 计算均值、中位数、最大值，用于质量评估。
-          Includes mean, median, and max values for quick quality assessment.
-        - 可作为数据清洗阶段的监控指标。
-          Useful for monitoring data quality before downstream processing.
+        One-row DataFrame summarizing missing-rate statistics
+        at both the sample and SNP levels.
+
+    Notes
+    -----
+    - 统计指标基于 ``Series.describe()`` 计算，
+      包括均值（mean）、中位数（50%）和最大值（max）。
+
+      Statistics are derived from ``Series.describe()``,
+      including mean, median (50%), and max values.
+
+    - 返回结果为单行 DataFrame，
+      适合用于日志记录或后续汇总。
+
+      The returned DataFrame contains a single row and is
+      suitable for logging or downstream aggregation.
     """
+
     sm = sample_missing.describe()
     cm = snp_missing.describe()
 
@@ -87,29 +122,58 @@ def build_missing_report(sample_missing: pd.Series, snp_missing: pd.Series) -> p
 def build_embedding_report(embedding: pd.DataFrame) -> pd.DataFrame:
     """
     生成降维嵌入结果的统计报告
-    Build a statistical report for embedding results.
 
-    计算降维结果中各维度的描述性统计（均值、标准差、最小值、最大值），
-    可用于分析降维后特征分布与检测维度坍缩。
-    Computes descriptive statistics (mean, std, min, max) for each embedding dimension,
-    useful for evaluating numeric range and detecting dimensional collapse.
+    Build a statistical summary report for embedding results.
 
-    :param embedding: pd.DataFrame
-        降维后的嵌入结果，列名通常为 ["Dim1", "Dim2", ...]。
-        The embedding matrix (columns typically "Dim1", "Dim2", ...).
+    本函数对降维后的 embedding 矩阵按维度计算
+    描述性统计指标，并返回每个维度一行的汇总表。
 
-    :return: pd.DataFrame
-        每个维度的统计报告。
-        Statistical summary per dimension.
+    This function computes descriptive statistics for each
+    dimension of an embedding matrix and returns a per-dimension
+    summary table.
 
-    说明 / Notes:
-        - 报告包括每个维度的均值、标准差、最小值与最大值。
-          Reports mean, standard deviation, min, and max per dimension.
-        - 可用于评估降维数值范围与稳定性。
-          Helps assess the numeric range and stability of embedding.
-        - 若某维度方差极低，可能暗示降维坍缩或特征冗余。
-          Low variance in a dimension may indicate collapse or redundancy.
+    Parameters
+    ----------
+    embedding : pandas.DataFrame
+        降维后的嵌入矩阵，列表示嵌入维度，
+        列名通常为 ``Dim1``, ``Dim2`` 等。
+
+        Embedding matrix where columns correspond to
+        embedding dimensions.
+
+    Returns
+    -------
+    pandas.DataFrame
+        每个嵌入维度一行的统计报告，
+        包含均值、标准差、最小值和最大值，
+        并将维度名称作为普通列返回。
+
+        Statistical summary per embedding dimension,
+        with one row per dimension and the dimension
+        name returned as a column.
+
+    Notes
+    -----
+    - 统计指标基于 ``DataFrame.describe()`` 计算，
+      并保留均值（Mean）、标准差（StdDev）、
+      最小值（Min）和最大值（Max）。
+
+      Statistics are derived from ``DataFrame.describe()``
+      and include mean, standard deviation, minimum, and maximum.
+
+    - 返回结果通过 ``reset_index()`` 展平索引，
+      便于后续导出或拼接。
+
+      The index is reset before returning to facilitate
+      export and downstream aggregation.
+
+    - 该报告可作为分析 embedding 数值分布的
+      辅助信息，但不包含任何自动判定逻辑。
+
+      The report provides descriptive statistics only
+      and does not perform automatic validity checks.
     """
+
     print("[INFO] Build embedding report:")
     stats = embedding.describe().T[["mean", "std", "min", "max"]]
     stats = stats.rename(columns={
@@ -126,64 +190,106 @@ def build_embedding_report(embedding: pd.DataFrame) -> pd.DataFrame:
 def save_report(df: pd.DataFrame, path: str | Path) -> None:
     """
     保存报告表格为 CSV 文件
+
     Save a report DataFrame as a CSV file.
 
-    将任意报告表（如缺失率报告或降维报告）保存为 CSV，
-    自动创建目录并采用 UTF-8 编码。
-    Saves any report table (e.g., missingness or embedding reports) as a UTF-8 CSV file,
-    automatically creating parent directories if needed.
+    本函数是对 ``save_csv`` 的轻量封装，
+    用于将分析报告表格导出为 CSV 文件，
+    并统一日志输出格式。
 
-    :param df: pd.DataFrame
-        报告表格。
-        Report DataFrame.
+    This function is a thin wrapper around ``save_csv`` for
+    exporting analysis report tables as CSV files with
+    consistent logging.
 
-    :param path: str | Path
-        输出文件路径。
-        Output file path.
+    Parameters
+    ----------
+    df : pandas.DataFrame
+        需要保存的报告表格。
 
-    说明 / Notes:
-        - 自动创建输出目录；
-          Automatically creates parent directories if they do not exist.
-        - 使用 UTF-8 编码导出；
-          Exports CSV with UTF-8 encoding.
-        - 输出包含列名。
-          Column headers are always included in the output.
+        Report DataFrame to be saved.
+
+    path : str or pathlib.Path
+        输出 CSV 文件路径。
+
+        Output path of the CSV file.
+
+    Returns
+    -------
+    None
+
+    Notes
+    -----
+    - 文件写入行为（如编码方式、是否创建目录）
+      由 ``save_csv`` 的具体实现决定。
+
+      File writing behavior (e.g. encoding, directory creation)
+      is delegated to the implementation of ``save_csv``.
+
+    - 本函数仅负责调用 ``save_csv`` 并输出状态日志，
+      不对数据内容做任何修改。
+
+      This function only handles delegation and logging
+      and does not modify the data.
     """
+
     save_csv(df, path, verbose=False)
     print(f"[OK] The report is saved: {path}")
 
 
 def save_runtime_report(records: list[dict], path: str | Path) -> None:
     """
-    保存降维运行时间统计报告
-    Save runtime summary report for embedding or imputation steps.
+    保存算法运行时间汇总报告
 
-    将各算法运行时间记录导出为 runtime_summary.csv，
-    用于性能比较或实验日志分析。
-    Exports runtime logs of algorithms to a CSV file for benchmarking or performance tracking.
+    Save a runtime summary report as a CSV file.
 
-    :param records: list[dict]
-        包含每个算法运行时间的字典列表，
-        格式示例：[{"imputation_method": "mode", "embedding_method": "umap", "runtime_s": 6.52}]。
-        List of runtime record dictionaries,
-        e.g., [{"imputation_method": "mode", "embedding_method": "umap", "runtime_s": 6.52}].
+    本函数将一组运行时间记录字典整理为表格，
+    并通过 ``save_csv`` 导出为 CSV 文件，
+    用于保存实验或流程的运行时间日志。
 
-    :param path: str | Path
-        输出文件路径。
-        Output file path.
+    This function converts a list of runtime record dictionaries
+    into a tabular format and exports it as a CSV file via
+    ``save_csv`` for logging and analysis.
 
-    :return: None
-        无返回值，直接写入文件。
-        None (writes file directly).
+    Parameters
+    ----------
+    records : list of dict
+        运行时间记录列表，每个元素为一个字典。
+        本函数不对字典结构做强制约束。
 
-    说明 / Notes:
-        - 若 records 为空，将输出警告并跳过保存。
-          If no records are provided, the function prints a warning and returns.
-        - 自动创建输出目录并保存为 CSV 文件。
-          Automatically saves the summary as a CSV file in UTF-8 encoding.
-        - 可用于生成性能比较报告或实验结果摘要。
-          Useful for building performance comparison summaries across methods.
+        List of runtime record dictionaries. The structure of
+        each dictionary is not enforced by this function.
+
+    path : str or pathlib.Path
+        输出 CSV 文件路径。
+
+        Output path of the CSV file.
+
+    Returns
+    -------
+    None
+
+    Notes
+    -----
+    - 若 ``records`` 为空列表，
+      本函数将打印警告信息并直接返回，
+      不会创建输出文件。
+
+      If ``records`` is empty, the function prints a warning
+      and returns without writing a file.
+
+    - 文件写入行为（如编码方式、目录创建）
+      由 ``save_csv`` 的具体实现决定。
+
+      File writing behavior (e.g. encoding, directory creation)
+      is delegated to the implementation of ``save_csv``.
+
+    - 本函数仅负责汇总与保存记录，
+      不对运行时间数据进行校验或解释。
+
+      This function only handles aggregation and saving
+      and does not validate or interpret runtime values.
     """
+
     print("[INFO] Collect the runtime summary:")
     if not records:
         print("[WARN] No runtime records to save.")

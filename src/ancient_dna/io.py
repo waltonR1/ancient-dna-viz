@@ -1,66 +1,130 @@
 """
 io.py
------------------
-文件读写（I/O）模块
-I/O module for file read/write operations.
+=====
 
-用于加载与保存基因型矩阵、样本注释表及通用 CSV 文件。
-Used to load and save genotype matrices, sample metadata tables, and general CSV files.
+文件读写模块（I/O Layer）
+Input/Output module for file read and write operations.
 
-功能：
-    - load_geno(): 读取基因型矩阵（CSV），提取样本ID与SNP矩阵；
-    - load_meta(): 读取样本注释表（含样本ID及元数据）；
-    - load_csv(): 通用CSV加载函数（带错误处理与信息提示）；
-    - save_csv(): 导出任意DataFrame为CSV文件。
-Functions:
-    - load_geno(): Read genotype matrix (CSV) and extract sample IDs and SNP matrix.
-    - load_meta(): Read sample metadata table (includes sample IDs and metadata).
-    - load_csv(): General CSV loading function with error handling and logging.
-    - save_csv(): Export any DataFrame to a CSV file.
+本模块用于加载与保存基因型矩阵、样本注释表以及通用 CSV 文件，
+是整个分析管线中的数据入口与出口组件。
 
-说明：
-    本模块是整个管线的数据入口与出口组件（Data I/O Layer），
-    负责数据文件的读取、清洗、转换与安全保存。
-    所有上层模块（如 preprocess、embedding、clustering 等）
-    均依赖此模块提供的标准化数据结构接口。
-Description:
-    This module serves as the data input/output layer for the entire pipeline.
-    It is responsible for reading, cleaning, transforming, and safely saving data files.
-    All higher-level modules (e.g., preprocess, embedding, clustering)
-    rely on this module to provide standardized data structure interfaces.
+This module provides utilities for loading and saving genotype
+matrices, sample metadata tables, and general CSV files.
+It serves as the data input/output layer of the analysis pipeline.
+
+Functions
+---------
+load_geno
+    读取基因型矩阵（CSV），提取样本 ID、SNP 数值矩阵及 SNP 列名。
+    Read a genotype matrix (CSV) and extract sample IDs,
+    the SNP matrix, and SNP column names.
+
+load_meta
+    读取样本注释表（CSV），并规范化样本 ID。
+    Read a sample metadata table and normalize sample IDs.
+
+load_csv
+    通用 CSV 加载函数，包含基础错误处理与信息提示。
+    General CSV loading utility with error handling and logging.
+
+save_csv
+    将任意 DataFrame 安全导出为 CSV 文件。
+    Export any DataFrame to a CSV file with optional logging.
+
+Description
+-----------
+本模块是整个管线的“数据 I/O 层（Data I/O Layer）”，
+负责数据文件的读取、基础清洗、结构化转换以及安全保存。
+所有上层模块（如 preprocess、embedding、clustering 等）
+均依赖此模块提供的标准化数据结构接口。
+
+This module serves as the data input/output layer of the pipeline.
+It handles data loading, basic cleaning, structural conversion,
+and safe persistence. All higher-level modules (e.g. preprocess,
+embedding, clustering) rely on this module for standardized
+data access interfaces.
 """
 
 from pathlib import Path
 from typing import Tuple, List
 import pandas as pd
 
-def load_geno(path: str | Path, id_col: str = "Genetic ID", sep: str = ";") -> Tuple[pd.Series, pd.DataFrame, List[str]]:
+
+def load_geno(
+        path: str | Path,
+        id_col: str = "Genetic ID",
+        sep: str = ";"
+) -> Tuple[pd.Series, pd.DataFrame, List[str]]:
     """
-    读取基因型矩阵（CSV；默认分号分隔），包含样本ID列与若干SNP列。
-    Load a genotype matrix (CSV; semicolon-separated by default) containing a sample ID column and multiple SNP columns.
+    读取基因型矩阵文件并提取样本 ID 与 SNP 矩阵
 
-    :param path:
-        文件路径（CSV）。首列/指定列应为样本ID，其余列为SNP（如rsID）。
-        Path to the CSV file. The first/specified column should contain sample IDs, and the remaining columns represent SNPs (e.g., rsIDs).
+    Load a genotype matrix and extract sample IDs and SNP data.
 
-    :param id_col:
-        样本ID列名（默认 "Genetic ID"）。
-        Name of the sample ID column (default: "Genetic ID").
+    本函数从 CSV 文件中读取基因型矩阵，
+    提取样本 ID 列与对应的 SNP 特征列，
+    并将 SNP 数据转换为数值矩阵以供后续分析使用。
 
-    :param sep:
-        CSV分隔符（默认 ";"）。
-        CSV delimiter (default: ";").
+    This function reads a genotype matrix from a CSV file,
+    extracts the sample ID column and SNP feature columns,
+    and converts SNP values into a numeric matrix for
+    downstream analysis.
 
-    :return:
-        (ids, X, snp_cols)
-        - ids: 样本ID序列 (pd.Series) / Series of sample IDs
-        - X: SNP数值矩阵 (pd.DataFrame)，行=样本，列=SNP / Numeric SNP matrix (rows=samples, columns=SNPs)
-        - snp_cols: SNP列名列表 / List of SNP column names
+    Parameters
+    ----------
+    path : str or pathlib.Path
+        基因型矩阵文件路径（CSV）。
+        文件中应包含一列样本 ID，其余列为 SNP 特征。
 
-    说明 / Notes:
-        - 除ID列外的所有列将尝试转为数值；无法解析的值会变为 NaN。
-        - All columns except the ID column will be converted to numeric; unparseable values become NaN.
+        Path to the genotype CSV file. The file must contain
+        a sample ID column, and the remaining columns represent SNPs.
+
+    id_col : str, default="Genetic ID"
+        样本 ID 所在的列名。
+
+        Name of the column containing sample IDs.
+
+    sep : str, default=";"
+        CSV 文件的分隔符。
+
+        Delimiter used in the CSV file.
+
+    Returns
+    -------
+    ids : pandas.Series
+        样本 ID 序列，与输入文件中的样本顺序一致。
+
+        Series of sample IDs, preserving the original order.
+
+    X : pandas.DataFrame
+        SNP 数值矩阵，行表示样本，列表示 SNP 特征。
+        无法解析为数值的元素将被置为 NaN。
+
+        Numeric SNP matrix with samples as rows and SNPs as columns.
+        Unparseable values are converted to NaN.
+
+    snp_cols : list of str
+        SNP 特征列名列表（不包含样本 ID 列）。
+
+        List of SNP column names (excluding the sample ID column).
+
+    Notes
+    -----
+    - 本函数会自动去除列名与样本 ID 中的首尾空白字符。
+
+      Column names and sample IDs are stripped of leading
+      and trailing whitespace.
+
+    - 除样本 ID 列外，其余列将统一尝试转换为数值类型。
+
+      All columns except the sample ID column are coerced
+      to numeric values.
+
+    - 若指定的样本 ID 列不存在，将抛出 ``KeyError``。
+
+      A ``KeyError`` is raised if the specified sample ID
+      column is not found.
     """
+
     df = pd.read_csv(path, sep=sep, dtype=str)
     df.columns = [c.strip() for c in df.columns]
     if id_col not in df.columns:
@@ -71,27 +135,68 @@ def load_geno(path: str | Path, id_col: str = "Genetic ID", sep: str = ";") -> T
     return ids, X, snp_cols
 
 
-def load_meta(path: str | Path, id_col: str = "Genetic ID", sep: str = ";") -> pd.DataFrame:
+def load_meta(
+        path: str | Path,
+        id_col: str = "Genetic ID",
+        sep: str = ";"
+) -> pd.DataFrame:
     """
-    读取样本注释表（CSV），需包含样本ID列。
-    Load a sample metadata table (CSV) that includes a sample ID column.
+    读取样本注释表并规范化样本 ID
 
-    :param path:
-        文件路径（CSV），需包含样本ID列。
-        Path to the CSV file containing sample IDs.
+    Load a sample metadata table and normalize sample IDs.
 
-    :param id_col:
-        样本ID列名（默认 "Genetic ID"）。
-        Name of the sample ID column (default: "Genetic ID").
+    本函数从 CSV 文件中读取样本注释表（metadata），
+    要求文件中包含样本 ID 列，并对样本 ID 进行
+    字符串化与去除首尾空白的规范化处理。
 
-    :param sep:
-        CSV分隔符（默认 ";"）。
-        CSV delimiter (default: ";").
+    This function reads a sample metadata table from a CSV file,
+    requires the presence of a sample ID column, and normalizes
+    sample IDs by converting them to strings and stripping
+    leading/trailing whitespace.
 
-    :return:
-        meta (pd.DataFrame) 样本注释表。
-        meta (pd.DataFrame) — Sample metadata table.
+    Parameters
+    ----------
+    path : str or pathlib.Path
+        样本注释表文件路径（CSV）。
+
+        Path to the CSV file containing sample metadata.
+
+    id_col : str, default="Genetic ID"
+        样本 ID 所在的列名。
+
+        Name of the column containing sample IDs.
+
+    sep : str, default=";"
+        CSV 文件的分隔符。
+
+        Delimiter used in the CSV file.
+
+    Returns
+    -------
+    pandas.DataFrame
+        样本注释表，包含规范化后的样本 ID 列，
+        其余列保持原样。
+
+        Sample metadata table with normalized sample IDs.
+
+    Notes
+    -----
+    - 本函数会自动去除所有列名中的首尾空白字符。
+
+      All column names are stripped of leading and
+      trailing whitespace.
+
+    - 样本 ID 列会被显式转换为字符串类型。
+
+      The sample ID column is explicitly converted
+      to string type.
+
+    - 若指定的样本 ID 列不存在，将抛出 ``KeyError``。
+
+      A ``KeyError`` is raised if the specified sample
+      ID column is missing.
     """
+
     meta = pd.read_csv(path, sep=sep, dtype=str)
     meta.columns = [c.strip() for c in meta.columns]
     if id_col not in meta.columns:
@@ -100,23 +205,72 @@ def load_meta(path: str | Path, id_col: str = "Genetic ID", sep: str = ";") -> p
     return meta
 
 
-def load_csv(path: str | Path, sep: str = ";") -> pd.DataFrame:
+def load_csv(
+        path: str | Path,
+        sep: str = ";"
+) -> pd.DataFrame:
     """
-    通用 CSV 加载函数（含错误处理与提示）。
-    General CSV loading function (with error handling and informative messages).
+    通用 CSV 文件加载函数
 
-    :param path:
-        文件路径。
-        Path to the file.
+    General-purpose CSV loading utility.
 
-    :param sep:
-        分隔符（默认 ";"，兼容内部标准）。
-        Delimiter (default: ";" for internal consistency).
+    本函数用于读取任意 CSV 文件，
+    提供基础的路径检查、错误处理以及
+    成功加载后的信息提示。
 
-    :return:
-        读取的 DataFrame。
+    This function loads a CSV file with basic path validation,
+    error handling, and informative logging upon success.
+
+    Parameters
+    ----------
+    path : str or pathlib.Path
+        CSV 文件路径。
+
+        Path to the CSV file.
+
+    sep : str, default=";"
+        CSV 文件分隔符。
+
+        Delimiter used in the CSV file.
+
+    Returns
+    -------
+    pandas.DataFrame
+        读取并解析后的 DataFrame。
+
         The loaded DataFrame.
+
+    Notes
+    -----
+    - 在尝试读取文件之前，会先检查文件是否存在。
+
+      The function checks whether the file exists
+      before attempting to load it.
+
+    - 成功读取后会打印文件名、行数和列数。
+
+      Upon successful loading, the function prints
+      the file name along with row and column counts.
+
+    - 读取过程中出现的异常将被捕获并重新抛出为
+      ``RuntimeError``，以提供更清晰的错误信息。
+
+      Any exception raised during loading is caught
+      and re-raised as a ``RuntimeError`` with context.
+
+    Raises
+    ------
+    FileNotFoundError
+        当指定的文件路径不存在时抛出。
+
+        Raised when the specified file path does not exist.
+
+    RuntimeError
+        当 CSV 读取失败时抛出。
+
+        Raised when loading the CSV file fails.
     """
+
     path = Path(path)
     if not path.exists():
         raise FileNotFoundError(f"File not found: {path}")
@@ -129,35 +283,79 @@ def load_csv(path: str | Path, sep: str = ";") -> pd.DataFrame:
         raise RuntimeError(f"Failed to load CSV {path}: {e}")
 
 
-def save_csv(df: pd.DataFrame, path: str | Path, sep: str = ";", index: bool = False, verbose: bool = True,) -> None:
+def save_csv(
+        df: pd.DataFrame,
+        path: str | Path,
+        sep: str = ";",
+        index: bool = False,
+        verbose: bool = True,
+) -> None:
     """
-    导出任意 DataFrame 为 CSV 文件。
-    Export any DataFrame to a CSV file.
+    将 DataFrame 导出为 CSV 文件
 
-    :param df:
-        需要导出的 DataFrame（可为SNP矩阵或合并后的大表）。
-        The DataFrame to export (can be SNP matrix or merged dataset).
+    Export a DataFrame to a CSV file.
 
-    :param path:
-        输出文件路径。
-        Output file path.
+    本函数将任意 pandas DataFrame 写入 CSV 文件，
+    在必要时会自动创建父目录，并可选输出保存完成的信息。
 
-    :param sep:
-        分隔符（默认 ","）。
-        Delimiter (default: ",").
+    This function writes a pandas DataFrame to a CSV file,
+    automatically creates parent directories if needed,
+    and optionally prints a confirmation message.
 
-    :param index:
-        是否导出 DataFrame 的行索引（默认 False）。
-        Whether to include the DataFrame index (default: False).
+    Parameters
+    ----------
+    df : pandas.DataFrame
+        需要导出的 DataFrame（如 SNP 矩阵、样本注释表或合并后的数据集）。
 
-    :param verbose:
-        是否打印保存信息（默认 True）。
-        Whether to print save confirmation (default: True).
+        The DataFrame to export (e.g. SNP matrix, metadata table,
+        or merged dataset).
 
-    :return:
-        None（直接写入文件）。
-        None (writes directly to file).
+    path : str or pathlib.Path
+        输出 CSV 文件路径。
+
+        Output path of the CSV file.
+
+    sep : str, default=";"
+        CSV 文件分隔符。
+
+        Delimiter used in the CSV file.
+
+    index : bool, default=False
+        是否在 CSV 文件中写入 DataFrame 的行索引。
+
+        Whether to write the DataFrame index to the CSV file.
+
+    verbose : bool, default=True
+        是否在保存完成后打印提示信息。
+
+        Whether to print a confirmation message after saving.
+
+    Returns
+    -------
+    None
+        本函数不返回值，结果直接写入文件。
+
+        This function returns ``None`` and writes the result
+        directly to disk.
+
+    Notes
+    -----
+    - 若输出路径的父目录不存在，将自动创建。
+
+      Parent directories of the output path are created
+      automatically if they do not exist.
+
+    - CSV 文件将使用指定的分隔符写入。
+
+      The CSV file is written using the specified delimiter.
+
+    - 当 ``verbose=True`` 时，将打印保存后的文件路径
+      及数据行数信息。
+
+      When ``verbose=True``, the function prints the saved
+      file path and the number of rows written.
     """
+
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     df.to_csv(path,sep = sep, index = index)

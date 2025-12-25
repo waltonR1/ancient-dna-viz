@@ -1,33 +1,52 @@
 """
 clustering.py
------------------
+=============
+
 聚类分析模块（Clustering Layer）
 Clustering and group analysis module.
 
-用于在基因型矩阵或降维嵌入空间中执行层次聚类（Hierarchical Clustering），
-自动确定聚类数、计算聚类纯度。
-Provides hierarchical clustering, automatic cluster-number selection,
-cluster purity evaluation.
+本模块用于在基因型矩阵或降维嵌入空间中执行层次聚类
+（Hierarchical Clustering），支持自动确定聚类数、
+计算聚类纯度等分析任务。
 
-功能 / Functions:
-    - find_optimal_clusters(): 自动搜索最佳聚类数（基于轮廓系数）
-      Automatically search for optimal number of clusters using silhouette scores.
-    - _run_hierarchical_clustering(): 执行层次聚类核心逻辑并可选绘制树状图。
-      Core function for hierarchical clustering with optional dendrogram plot.
-    - cluster_high_dimensional(): 在高维 SNP 空间执行聚类。
-      Perform clustering in high-dimensional SNP space.
-    - cluster_on_embedding(): 在降维结果 (t-SNE / UMAP) 空间聚类。
-      Perform clustering on low-dimensional embedding space.
-    - compare_clusters_vs_labels(): 对比聚类结果与真实标签一致性。
-      Compare clustering assignments against ground-truth labels.
+This module provides hierarchical clustering utilities for
+genotype matrices and low-dimensional embeddings, including
+automatic cluster-number selection and cluster purity evaluation.
 
-说明 / Description:
-    本模块属于分析流程的“聚类层”（Clustering Layer），
-    负责从基因型数据或降维结果中提取样本分群结构，
-    并结合元数据计算聚类质量与生物学一致性。
-    The module serves as the clustering layer of the analysis pipeline,
-    discovering group structures in genotype or embedding data,
-    and evaluating biological consistency and clustering quality metrics.
+Functions
+---------
+find_optimal_clusters_embedding
+    自动搜索最佳聚类数（基于轮廓系数）。
+    Automatically search for the optimal number of clusters
+    using silhouette scores.
+
+_run_hierarchical_clustering
+    执行层次聚类的核心逻辑，并可选绘制树状图。
+    Core function for hierarchical clustering with optional
+    dendrogram visualization.
+
+cluster_high_dimensional
+    在高维 SNP 空间中执行聚类。
+    Perform clustering in high-dimensional SNP space.
+
+cluster_on_embedding
+    在降维结果（t-SNE / UMAP）空间中执行聚类。
+    Perform clustering on low-dimensional embedding space.
+
+compare_clusters_vs_labels
+    对比聚类结果与真实标签的一致性，计算聚类纯度。
+    Compare clustering assignments against ground-truth labels
+    and evaluate cluster purity.
+
+Description
+-----------
+本模块属于分析流程中的“聚类层（Clustering Layer）”，
+负责从基因型数据或降维结果中提取样本的分群结构，
+并结合元数据评估聚类质量及其生物学一致性。
+
+The module serves as the clustering layer of the analysis pipeline,
+discovering group structures in genotype or embedding data and
+evaluating clustering quality and biological consistency.
 """
 
 import numpy as np
@@ -39,39 +58,80 @@ from sklearn.metrics import silhouette_score
 from tqdm import tqdm
 
 
-def find_optimal_clusters_embedding(X: pd.DataFrame, linkage_method: str = "average", metric: str = "euclidean", cluster_range: range = range(2, 11)) -> tuple[int, list[tuple[int, float]]]:
+def find_optimal_clusters_embedding(
+    X: pd.DataFrame,
+    linkage_method: str = "average",
+    metric: str = "euclidean",
+    cluster_range: range = range(2, 11),
+) -> tuple[int, list[tuple[int, float]]]:
     """
     自动搜索最佳聚类数（基于 Silhouette Score）
-    Automatically determine the optimal number of clusters based on silhouette scores.
 
-    :param X: pd.DataFrame
-        输入矩阵（行=样本，列=特征）。
-        Input matrix (rows = samples, columns = features).
+    Automatically determine the optimal number of clusters using silhouette scores.
 
-    :param linkage_method: str
-        聚类合并策略（默认 "average"）。
-        Linkage method (default "average").
+    本函数在给定的聚类数范围内遍历不同的 k 值，
+    对每一个 k 执行层次聚类（Agglomerative Clustering），
+    并计算对应的平均轮廓系数（Silhouette Score），
+    最终返回轮廓系数最高的聚类数。
 
-    :param metric: str
-        距离度量方式（默认 "euclidean"）。
-        Distance metric (default "euclidean").
+    The function iterates over a range of cluster numbers and performs
+    hierarchical clustering for each value of ``k``. The optimal
+    number of clusters is selected based on the highest average
+    silhouette score.
 
-    :param cluster_range: range
-        搜索聚类数范围（默认 2~10）。
-        Range of cluster numbers to search (default 2–10).
+    Parameters
+    ----------
+    X : pandas.DataFrame
+        输入特征矩阵，行表示样本，列表示特征。
 
-    :return: (best_k, scores)
-        - best_k: 最优聚类数
-        - scores: [(k, silhouette)] 轮廓系数列表
+        Input feature matrix where rows correspond to samples and
+        columns correspond to features.
 
-    说明 / Notes:
-        - 自动遍历 k ∈ [2, 10)，计算平均轮廓系数；
-          Iterates over k and computes mean silhouette score.
-        - 轮廓系数越高表示聚类越合理。
-          Higher score indicates better clustering separation.
-        - 最终返回得分最高的聚类数。
-          Returns the k with highest silhouette score.
+    linkage_method : str, default="average"
+        层次聚类的合并策略（如 ``"ward"``、``"average"``、``"complete"``）。
+
+        Linkage strategy used in hierarchical clustering.
+
+    metric : str, default="euclidean"
+        距离度量方式。
+
+        Distance metric used to compute inter-sample distances.
+
+    cluster_range : range, default=range(2, 11)
+        搜索的聚类数范围（默认 2–10）。
+
+        Range of cluster numbers to evaluate.
+
+    Returns
+    -------
+    best_k : int
+        最优聚类数（对应最高的 Silhouette Score）。
+
+        Optimal number of clusters corresponding to the highest
+        silhouette score.
+
+    scores : list of tuple (int, float)
+        每个 k 对应的 ``(k, silhouette_score)`` 列表。
+
+        List of ``(k, silhouette_score)`` pairs for all tested
+        cluster numbers.
+
+    Notes
+    -----
+    - 轮廓系数越高，表示类内更紧凑、类间更分离。
+
+      Higher silhouette scores indicate better-defined clusters.
+
+    - 当聚类结果退化为单一簇时，其轮廓系数记为 ``-1``。
+
+      Degenerate clustering solutions are assigned a score of ``-1``.
+
+    - 本函数假设输入特征已完成必要的预处理（如标准化）。
+
+      The function assumes that input features have already been
+      preprocessed if necessary.
     """
+
     scores = []
     print(f"[INFO] Searching optimal number of clusters ({cluster_range.start}–{cluster_range.stop - 1}) ...")
 
@@ -90,45 +150,107 @@ def find_optimal_clusters_embedding(X: pd.DataFrame, linkage_method: str = "aver
     return best_k, scores
 
 
-def _run_hierarchical_clustering(X: pd.DataFrame, n_clusters: int = 5, linkage_method: str = "ward", metric: str = "euclidean", plot: bool = True, show_levels: int = 5, compute_silhouette: bool = True) -> tuple[pd.Series, float | None]:
+def _run_hierarchical_clustering(
+        X: pd.DataFrame,
+        n_clusters: int = 5,
+        linkage_method: str = "ward",
+        metric: str = "euclidean",
+        plot: bool = True,
+        show_levels: int = 5,
+        compute_silhouette: bool = True,
+) -> tuple[pd.Series, float | None]:
     """
-    执行层次聚类（Hierarchical Clustering）
-    Perform hierarchical clustering with optional dendrogram visualization.
+    执行一次完整的层次聚类流程（内部通用函数）
 
-    :param X: pd.DataFrame
-        输入矩阵。Input data matrix.
+    Perform a complete hierarchical clustering procedure (internal utility).
 
-    :param n_clusters: int, default=5
-        聚类数。Number of clusters.
+    本函数封装了层次聚类的核心流程，包括：
+    1）构建层次聚类树结构（用于可视化）
+    2）可选绘制树状图（dendrogram）
+    3）使用 AgglomerativeClustering 生成最终聚类标签
+    4）可选计算平均轮廓系数（Silhouette Score）
 
-    :param linkage_method: str, default="ward"
-        合并策略。Linkage strategy ("ward", "average", etc.).
+    This function encapsulates the core steps of hierarchical clustering,
+    including hierarchical tree construction, optional dendrogram
+    visualization, final cluster assignment, and optional silhouette
+    score computation.
 
-    :param metric: str, default="euclidean"
-        距离度量。Distance metric.
+    Parameters
+    ----------
+    X : pandas.DataFrame
+        输入特征矩阵，行表示样本，列表示特征。
 
-    :param plot: bool, default=True
-        是否绘制树状图。Whether to plot dendrogram.
+        Input feature matrix where rows correspond to samples and
+        columns correspond to features.
 
-    :param show_levels: int, default=5
-        树状图显示层级。Levels to display in dendrogram.
+    n_clusters : int, default=5
+        最终切分得到的聚类数。
 
-    :param compute_silhouette: bool, default=True
-        是否计算轮廓系数。Compute silhouette score or not.
+        Number of clusters to form.
 
-    :return: tuple(pandas.Series, float | None)
-        聚类标签与平均轮廓系数。Cluster labels and optional silhouette score.
+    linkage_method : str, default="ward"
+        层次聚类的合并策略（如 ``"ward"``、``"average"``）。
 
-    说明 / Notes:
-        - linkage() 用于生成层次聚类树结构矩阵。
-          linkage() computes the hierarchical tree structure.
-        - dendrogram() 绘制层次聚类可视化。
-          dendrogram() visualizes sample merging.
-        - AgglomerativeClustering 执行最终聚类分配。
-          AgglomerativeClustering performs final cluster assignment.
-        - silhouette_score 可用于聚类质量评估。
-          silhouette_score evaluates cluster separation quality.
+        Linkage strategy used in hierarchical clustering.
+
+    metric : str, default="euclidean"
+        距离度量方式。
+
+        Distance metric used to compute inter-sample distances.
+
+    plot : bool, default=True
+        是否绘制层次聚类树状图（dendrogram）。
+
+        Whether to plot the dendrogram.
+
+    show_levels : int, default=5
+        树状图中显示的层级深度（用于截断显示）。
+
+        Number of hierarchical levels to display in the dendrogram.
+
+    compute_silhouette : bool, default=True
+        是否计算并返回平均轮廓系数。
+
+        Whether to compute and return the silhouette score.
+
+    Returns
+    -------
+    labels : pandas.Series
+        每个样本对应的聚类标签，索引与输入数据一致。
+
+        Cluster labels indexed by sample.
+
+    score : float or None
+        平均轮廓系数；若未计算或聚类退化则为 ``None``。
+
+        Mean silhouette score if computed, otherwise ``None``.
+
+    Notes
+    -----
+    - 本函数同时使用 ``scipy.cluster.hierarchy.linkage`` 和
+      ``sklearn.cluster.AgglomerativeClustering``：
+
+      The function uses both ``scipy.cluster.hierarchy.linkage`` and
+      ``sklearn.cluster.AgglomerativeClustering``.
+
+    - ``linkage`` 仅用于构建层次结构和绘制树状图，
+      并不决定最终的聚类标签。
+
+      ``linkage`` is used only for hierarchical structure construction
+      and visualization, not for final cluster assignment.
+
+    - 当 ``linkage_method="ward"`` 时，仅支持欧氏距离，
+      否则会抛出异常。
+
+      Ward linkage requires Euclidean distance; other metrics
+      will raise an error.
+
+    - 当聚类结果退化为单一簇时，不计算轮廓系数。
+
+      Silhouette score is not computed for degenerate clustering
+      solutions.
     """
+
     print(f"[INFO] Hierarchical clustering — linkage={linkage_method}, metric={metric}")
 
     if linkage_method == "ward" and metric != "euclidean":
@@ -160,31 +282,68 @@ def _run_hierarchical_clustering(X: pd.DataFrame, n_clusters: int = 5, linkage_m
     return pd.Series(labels, name="cluster", index=X.index), score
 
 
-def cluster_high_dimensional(X_imputed: pd.DataFrame, meta: pd.DataFrame, n_clusters: int = 5):
+def cluster_high_dimensional(
+        X_imputed: pd.DataFrame,
+        meta: pd.DataFrame,
+        n_clusters: int = 5,
+):
     """
-    在高维 SNP 空间执行层次聚类
+    在高维 SNP 特征空间中执行层次聚类
+
     Perform hierarchical clustering directly in high-dimensional SNP space.
 
-    :param X_imputed: pd.DataFrame
-        已填补缺失值的基因型矩阵。Imputed SNP matrix.
+    本函数直接在原始的高维基因型特征空间（如 SNP 矩阵）中
+    执行层次聚类，并将聚类结果写入样本元数据表中。
 
-    :param meta: pd.DataFrame
-        样本元数据表。Sample metadata table.
+    The function performs hierarchical clustering directly on the
+    full-dimensional genotype feature space and appends the resulting
+    cluster assignments to the metadata table.
 
-    :param n_clusters: int, default=5
-        聚类数。Number of clusters.
+    Parameters
+    ----------
+    X_imputed : pandas.DataFrame
+        已完成缺失值填补的基因型矩阵（样本 × SNP）。
 
-    :return: pd.DataFrame
-        含聚类结果的元数据表。Metadata with cluster assignments.
+        Imputed genotype matrix (samples × SNPs).
 
-    说明 / Notes:
-        - 直接在原始高维空间执行聚类。
-          Performs clustering on full-dimensional genotype data.
-        - 返回的 meta 表新增 “cluster” 列。
-          Adds new “cluster” column to metadata table.
-        - 可用于与地理/种群标签对比分析。
-          Useful for comparing against population or regional labels.
+    meta : pandas.DataFrame
+        与样本一一对应的元数据表。
+
+        Sample metadata table aligned with the genotype matrix.
+
+    n_clusters : int, default=5
+        聚类数。
+
+        Number of clusters to form.
+
+    Returns
+    -------
+    pandas.DataFrame
+        在原元数据表基础上新增 ``"cluster"`` 列，
+        表示每个样本所属的聚类编号。
+
+        Metadata table with an additional ``"cluster"`` column
+        containing cluster assignments.
+
+    Notes
+    -----
+    - 本函数在高维空间中计算样本间距离，
+      当样本数量较大时，计算开销可能较高。
+
+      Distance computation in high-dimensional space can be
+      computationally expensive for large datasets.
+
+    - 当样本数量超过一定规模时，会给出性能警告。
+
+      A warning is issued when the dataset size exceeds
+      a practical threshold.
+
+    - 该函数主要用于验证性分析或与降维聚类结果进行对照。
+
+      This function is mainly intended for validation or
+      comparison with clustering results in embedding space.
     """
+
     if X_imputed.shape[0] > 2000:
         print("[WARN] High-dimensional clustering may be very slow for large datasets.")
     labels, score = _run_hierarchical_clustering(X_imputed, n_clusters=n_clusters, plot=False)
@@ -194,32 +353,68 @@ def cluster_high_dimensional(X_imputed: pd.DataFrame, meta: pd.DataFrame, n_clus
     return meta
 
 
-def cluster_on_embedding(embedding_df: pd.DataFrame, meta: pd.DataFrame, n_clusters: int = 5):
+def cluster_on_embedding(
+        embedding_df: pd.DataFrame,
+        meta: pd.DataFrame,
+        n_clusters: int = 5,
+):
     """
-    在降维空间 (t-SNE / UMAP) 执行聚类
-    Perform clustering in low-dimensional embedding space.
+    在降维嵌入空间中执行层次聚类（UMAP / t-SNE 等）
 
-    :param embedding_df: pd.DataFrame
-        降维结果 (含 Dim1, Dim2)。Embedding coordinates.
+    Perform hierarchical clustering in low-dimensional embedding space.
 
-    :param meta: pd.DataFrame
-        样本元数据。Sample metadata.
+    本函数在降维后的嵌入坐标空间（如 UMAP、t-SNE 或 PCA）中
+    执行层次聚类，并将聚类结果写入样本元数据表。
 
-    :param n_clusters: int, default=5
-        聚类数。Number of clusters.
+    The function performs hierarchical clustering in a low-dimensional
+    embedding space (e.g. UMAP, t-SNE, or PCA) and appends the resulting
+    cluster assignments to the metadata table.
 
-    :return: pd.DataFrame
-        更新后的 meta 表，包含 “cluster”。
-        Updated metadata table including “cluster”
+    Parameters
+    ----------
+    embedding_df : pandas.DataFrame
+        降维后的嵌入坐标矩阵（如 Dim1, Dim2, [Dim3]）。
 
-    说明 / Notes:
-        - 在降维结果基础上执行层次聚类。
-          Performs clustering on 2D/3D embeddings.
-        - 计算并打印平均轮廓系数。
-          Computes and prints average silhouette score.
-        - 输出与原 meta 表顺序一致。
-          Output order matches original metadata.
+        Low-dimensional embedding coordinates (e.g. Dim1, Dim2, [Dim3]).
+
+    meta : pandas.DataFrame
+        样本元数据表，与嵌入坐标按索引对齐。
+
+        Sample metadata table aligned with the embedding indices.
+
+    n_clusters : int, default=5
+        聚类数。
+
+        Number of clusters to form.
+
+    Returns
+    -------
+    pandas.DataFrame
+        对齐后的元数据表，并新增 ``"cluster"`` 列，
+        表示每个样本在嵌入空间中的聚类编号。
+
+        Metadata table aligned to the embedding with an additional
+        ``"cluster"`` column.
+
+    Notes
+    -----
+    - 聚类仅基于降维后的嵌入坐标，
+      不再使用原始高维基因型特征。
+
+      Clustering is performed only on the embedding coordinates,
+      not on the original high-dimensional genotype data.
+
+    - 元数据表会根据嵌入矩阵的索引进行对齐。
+
+      The metadata table is aligned to the embedding indices
+      before cluster assignment.
+
+    - 该函数通常用于可视化分析或与已知标签进行对照。
+
+      This function is commonly used for visualization and
+      interpretative analysis.
     """
+
     meta_aligned = meta.loc[embedding_df.index].copy()
     labels, score = _run_hierarchical_clustering(embedding_df, n_clusters=n_clusters, linkage_method="ward", metric="euclidean", plot=False)
     meta_aligned["cluster"] = labels
@@ -228,40 +423,75 @@ def cluster_on_embedding(embedding_df: pd.DataFrame, meta: pd.DataFrame, n_clust
     return meta_aligned
 
 
-def compare_clusters_vs_labels(meta: pd.DataFrame, cluster_col: str = "cluster_2D", label_col: str = "World Zone") -> pd.DataFrame:
+def compare_clusters_vs_labels(
+        meta: pd.DataFrame,
+        cluster_col: str = "cluster_2D",
+        label_col: str = "World Zone",
+) -> pd.DataFrame:
     """
-    聚类结果与真实标签对比分析
+    聚类结果与真实标签的一致性分析
+
     Compare clustering assignments with ground-truth labels.
 
-    统计每个聚类簇中主标签（Dominant Label）及其纯度（Dominant %），
-    评估聚类与真实分类的一致性。
-    Summarizes cluster composition and dominant label purity
-    to assess consistency with known classes.
+    本函数统计每个聚类簇中不同真实标签的样本数量，
+    识别每个簇的主导标签（Dominant Label），
+    并计算其所占比例（聚类纯度）。
 
-    :param meta: pd.DataFrame
-        样本元数据（包含 cluster_col 与 label_col）。
-        Metadata including both cluster and label columns.
+    The function summarizes the composition of each cluster
+    with respect to known labels, identifies the dominant
+    label per cluster, and computes cluster purity.
 
-    :param cluster_col: str
-        聚类结果列名（默认 "cluster_2D"）。
-        Column name of cluster assignments.
+    Parameters
+    ----------
+    meta : pandas.DataFrame
+        包含聚类结果列和真实标签列的样本元数据表。
 
-    :param label_col: str
-        真实标签列名（默认 "World Zone"）。
-        Column name of ground-truth labels.
+        Sample metadata table containing both cluster and
+        ground-truth label columns.
 
-    :return: pd.DataFrame
-        每簇组成统计表，包含主标签与纯度。
-        Cluster composition table with dominant label and purity.
+    cluster_col : str, default="cluster_2D"
+        聚类结果所在的列名。
 
-    说明 / Notes:
-        - 通过交叉统计计算每簇主标签。
-          Cross-tabulates cluster vs. label counts.
-        - 纯度表示主标签样本比例。
-          Purity represents the proportion of dominant label samples.
-        - 可用于验证聚类的语义合理性。
-          Useful for validating semantic or biological consistency of clusters.
+        Column name containing cluster assignments.
+
+    label_col : str, default="World Zone"
+        真实标签所在的列名（如地理区域或种群标签）。
+
+        Column name containing ground-truth labels.
+
+    Returns
+    -------
+    pandas.DataFrame
+        聚类组成统计表，每一行对应一个聚类簇，包含：
+
+        - 各真实标签在该簇中的样本数量
+        - ``Total``：该簇的样本总数
+        - ``Dominant Label``：样本数最多的真实标签
+        - ``Dominant %``：主导标签所占比例（百分比）
+
+        A cluster composition summary table including:
+        counts per label, total sample size, dominant label,
+        and dominant label percentage.
+
+    Notes
+    -----
+    - 聚类纯度定义为主导标签样本数除以该簇样本总数。
+
+      Cluster purity is defined as the proportion of samples
+      belonging to the dominant label.
+
+    - 该指标为描述性统计，不考虑标签之间的语义或距离关系。
+
+      This metric is descriptive and does not account for
+      semantic or hierarchical relationships between labels.
+
+    - 该函数适用于分析聚类结果的可解释性，
+      而非作为聚类算法的优化目标。
+
+      This function is intended for interpretability analysis,
+      not as an optimization criterion.
     """
+
     if cluster_col not in meta.columns or label_col not in meta.columns:
         raise ValueError(f"Missing column: {cluster_col} or {label_col}")
 
