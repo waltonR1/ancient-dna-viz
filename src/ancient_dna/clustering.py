@@ -425,7 +425,7 @@ def cluster_on_embedding(
 
 def compare_clusters_vs_labels(
         meta: pd.DataFrame,
-        cluster_col: str = "cluster_2D",
+        cluster_col: str = "cluster",
         label_col: str = "World Zone",
 ) -> pd.DataFrame:
     """
@@ -449,7 +449,7 @@ def compare_clusters_vs_labels(
         Sample metadata table containing both cluster and
         ground-truth label columns.
 
-    cluster_col : str, default="cluster_2D"
+    cluster_col : str, default="cluster"
         聚类结果所在的列名。
 
         Column name containing cluster assignments.

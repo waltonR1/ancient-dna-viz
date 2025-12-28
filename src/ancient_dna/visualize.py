@@ -589,7 +589,7 @@ def plot_embedding_interactive(
         cmap: str = "tab20",
         others_color: tuple = (0.7, 0.7, 0.7, 0.5),
         save_path: str | Path | None = None,
-):
+)-> go.Figure:
     """
     绘制交互式 embedding 可视化（Plotly）
     Plot an interactive embedding visualization using Plotly.
@@ -783,7 +783,7 @@ def plot_embedding_interactive(
         print(f"[OK] Interactive figure saved → {save_path}")
     else:
         fig.show()
-        print("[OK} Figure shown interactively.")
+        print("[OK] Figure shown interactively.")
 
     return fig
 

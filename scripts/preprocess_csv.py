@@ -266,14 +266,13 @@ def main():
     # label_columns = [
     #     "Y haplogroup",
     #     "World Zone",
-    #     "Political Entity"
     # ]
     label_columns = [
         "World Zone"
     ]
 
     # === 4. 需要测试的组合 ===
-    impute_methods = ['knn_auto']
+    impute_methods = ['knn_hamming_balltree']
     reduce_methods = ["tsne"]
 
     runtime_records = []

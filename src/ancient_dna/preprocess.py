@@ -393,7 +393,7 @@ def filter_by_missing(
     """
 
     print("[INFO] Filter by missing rate:")
-    keep_rows = sample_missing <= max_sample_missing
+    keep_rows: pd.Series = (sample_missing <= max_sample_missing).astype(bool)
     keep_cols = snp_missing[snp_missing <= max_snp_missing].index
     X_filtered = X.loc[keep_rows, keep_cols].reset_index(drop=True)
     print(f"[INFO] Sample: {keep_rows.sum()}/{len(X)} reserved, SNP: {len(keep_cols)}/{X.shape[1]} reserved")
@@ -1683,7 +1683,7 @@ def clean_labels_and_align(
         行索引已重置为连续整数索引。
 
         Filtered and aligned embedding matrix with
-        reset integer index.
+         a reset integer index.
 
     labels_clean : pandas.Series
         与 ``emb_clean`` 行顺序一致的标签序列，
