@@ -29,32 +29,36 @@ This manual provides detailed documentation of all modules, function interfaces,
 
 ---
 
-This module provides clustering analysis functions for executing hierarchical clustering (Hierarchical Clustering) on genotype matrices or embedding spaces, automatically determining the optimal number of clusters and computing cluster purity.
+This module belongs to the **Clustering Layer** of the analysis pipeline. It is used to perform **hierarchical clustering** on either **high-dimensional genotype matrices** or **low-dimensional embedding spaces** (UMAP / t-SNE / PCA), and supports:
+
+- **Automatic search for the optimal number of clusters** (using the Silhouette Score)
+- **Clustering in both high-dimensional and low-dimensional spaces**
+- **Computation and evaluation of the consistency between clustering results and ground-truth labels** (cluster purity)
 
 ### 📋 Function Overview
 
-|        Function Name         |                               Description                                |
-|:----------------------------:|:------------------------------------------------------------------------:|
-|   `find_optimal_clusters`    |         Automatically search for the optimal number of clusters          |
-|  `cluster_high_dimensional`  |      Perform hierarchical clustering in high-dimensional SNP space       |
-|    `cluster_on_embedding`    | Perform clustering in reduced-dimensional (t-SNE / UMAP) embedding space |
-| `compare_clusters_vs_labels` |           Compare cluster results with true label consistency            |
+|           Function Name           |                               Description                                |
+|:---------------------------------:|:------------------------------------------------------------------------:|
+| `find_optimal_clusters_embedding` |         Automatically search for the optimal number of clusters          |
+|    `cluster_high_dimensional`     |      Perform hierarchical clustering in high-dimensional SNP space       |
+|      `cluster_on_embedding`       | Perform clustering in reduced-dimensional (t-SNE / UMAP) embedding space |
+|   `compare_clusters_vs_labels`    |           Compare cluster results with true label consistency            |
 
 ---
 
-### 1.1 find_optimal_clusters
+### 1.1 find_optimal_clusters_embedding
 
 Automatically search for the optimal number of clusters (based on **Silhouette Score**).
 By iterating over different numbers of clusters `k`, it calculates the average silhouette score for each clustering scheme and automatically selects the optimal number of clusters.
 
 **Parameters:**
 
-|    Parameter     |      Type      |    Default     |                                Description                                 |
-|:----------------:|:--------------:|:--------------:|:--------------------------------------------------------------------------:|
-|       `X`        | `pd.DataFrame` |                |             Input matrix (rows = samples, columns = features).             |
-| `linkage_method` |     `str`      |  `"average"`   | Linkage strategy such as `"single"`, `"complete"`, `"average"`, `"ward"`.  |
-|     `metric`     |     `str`      |  `"hamming"`   |        Distance metric (suitable for binary or genotype matrices).         |
-| `cluster_range`  |    `range`     | `range(2, 11)` |         Range of cluster numbers to search (default from 2 to 10).         |
+|    Parameter     |      Type      |    Default     |                                Description                                |
+|:----------------:|:--------------:|:--------------:|:-------------------------------------------------------------------------:|
+|       `X`        | `pd.DataFrame` |                |            Input matrix (rows = samples, columns = features).             |
+| `linkage_method` |     `str`      |  `"average"`   | Linkage strategy such as `"single"`, `"complete"`, `"average"`, `"ward"`. |
+|     `metric`     |     `str`      | `"euclidean"`  |        Distance metric (suitable for binary or genotype matrices).        |
+| `cluster_range`  |    `range`     | `range(2, 11)` |        Range of cluster numbers to search (default from 2 to 10).         |
 
 **Returns:**
 
@@ -70,6 +74,7 @@ By iterating over different numbers of clusters `k`, it calculates the average s
 3. If the clustering result contains multiple clusters, compute the average silhouette score;
 4. Record `(k, score)` into a list;
 5. Select the clustering number `best_k` with the highest silhouette score and return it.
+6. When the clustering result of a certain k degenerates into a single cluster, its silhouette coefficient is denoted as -1.
 
 **Example:**
 
@@ -95,7 +100,8 @@ print("Silhouette score results:", scores)
 * The silhouette score measures compactness within clusters and separation between clusters.
 * A higher score indicates better clustering performance.
 * Suitable for small to medium-sized datasets for automatic clustering optimization.
-* Can be used with `plot_silhouette_trend()` to visualize and evaluate the optimal cluster number.
+* Can be used with [`plot_silhouette_trend()`](#75-plot_silhouette_trend) to visualize and evaluate the optimal cluster number.
+* When `linkage_method="ward"`, only the `"euclidean"` distance metric is supported.
 
 ---
 
@@ -151,7 +157,7 @@ print(meta_clustered)
 * Performs clustering directly in high-dimensional space without dimensionality reduction.
 * Outputs the number of clusters and silhouette score in the console.
 * Useful for comparing with geographic regions, haplogroups, or true labels.
-* Results can be visualized using `plot_cluster_on_embedding()` to display cluster distribution.
+* Results can be visualized using [`plot_cluster_on_embedding()`](#74-plot_cluster_on_embedding) to display cluster distribution.
 * For very high-dimensional data, computation may be heavy; consider validating results after dimensionality reduction.
 
 ---
@@ -171,16 +177,16 @@ Based on low-dimensional embedding coordinates (e.g., 2D or 3D), hierarchical cl
 
 **Returns:**
 
-`(meta_with_cluster_2D: pd.DataFrame)`
+`(meta_aligned: pd.DataFrame)`
 
-* **meta_with_cluster_2D**: Metadata table with an added `"cluster_2D"` column recording cluster results in the embedding space.
+* **meta_aligned**: Metadata table with an added `"cluster"` column recording cluster results in the embedding space.
 
 **Algorithm Logic:**
 
 1. Perform hierarchical clustering on the embedding results (`embedding_df`);
 2. Automatically compute the average silhouette score;
 3. Add clustering label results to the input `meta` table;
-4. Return the new metadata table containing the `"cluster_2D"` column.
+4. Return the new metadata table containing the `"cluster"` column.
 
 **Example:**
 
@@ -206,9 +212,10 @@ print(meta_clustered)
 
 * Suitable for clustering analysis based on dimensionality reduction results (UMAP, t-SNE, MDS, etc.).
 * Can be used to verify consistency between visualization and true labels.
-* The clustering result adds a `"cluster_2D"` column, preserving the same order as the input `meta` table.
-* The results can be visualized using `plot_cluster_on_embedding()` for cluster distribution.
+* The clustering result adds a `"cluster"` column, preserving the same order as the input `meta` table.
+* The results can be visualized using [`plot_cluster_on_embedding()`](#74-plot_cluster_on_embedding) for cluster distribution.
 * A higher silhouette score indicates better clustering in the embedding space.
+* When `linkage_method="ward"`, only the `"euclidean"` distance metric is supported.
 
 ---
 
@@ -222,7 +229,7 @@ By counting the dominant label (**Dominant Label**) and its purity (**Dominant %
 |   Parameter   |      Type      |    Default     |                                         Description                                         |
 |:-------------:|:--------------:|:--------------:|:-------------------------------------------------------------------------------------------:|
 |    `meta`     | `pd.DataFrame` |                |                 Sample metadata table containing cluster and label columns.                 |
-| `cluster_col` |     `str`      | `"cluster_2D"` | Name of the column containing cluster results (e.g., generated by `cluster_on_embedding`).  |
+| `cluster_col` |     `str`      |  `"cluster"`   | Name of the column containing cluster results (e.g., generated by `cluster_on_embedding`).  |
 |  `label_col`  |     `str`      | `"World Zone"` |                  Column name of true classification labels for comparison.                  |
 
 **Returns:**
@@ -261,7 +268,7 @@ print(summary)
 * Purity (**Dominant %**) measures the proportion of the dominant label in each cluster.
 * High purity indicates good alignment between clustering results and true labels.
 * Useful for validating genotype clustering against geographic, population, or biological labels.
-* Can be combined with `plot_cluster_on_embedding()` for visual validation.
+* Can be combined with [`plot_cluster_on_embedding()`](#74-plot_cluster_on_embedding) for visual validation.
 * The output summary table can be directly used for reports or further analysis.
 
 ---
@@ -290,7 +297,7 @@ Unified dimensionality reduction interface that selects the algorithm based on t
 |   Parameter    |      Type      | Default |                                Description                                |
 |:--------------:|:--------------:|:-------:|:-------------------------------------------------------------------------:|
 |      `X`       | `pd.DataFrame` |         |             Genotype matrix (rows = samples, columns = SNPs).             |
-|    `method`    |     `str`      |         | Dimensionality reduction method: `'umap'`, `'tsne'`, `'mds'`, `'isomap'`. |
+|    `method`    |     `str`      | `umap`  | Dimensionality reduction method: `'umap'`, `'tsne'`, `'mds'`, `'isomap'`. |
 | `n_components` |     `int`      |         |                      Target dimensionality (2 or 3).                      |
 |   `**kwargs`   |       —        |         |          Additional parameters passed to the specific algorithm.          |
 
@@ -298,7 +305,7 @@ Unified dimensionality reduction interface that selects the algorithm based on t
 
 `(embedding: pd.DataFrame)`
 
-* **embedding**: The projection result with columns such as `Dim1`, `Dim2`, etc.
+* **embedding**: The projection results with columns such as `Dim1`, `Dim2`, etc.
 
 **Example:**
 
@@ -404,7 +411,7 @@ Read and prepare `.geno` file, extracting basic characteristics.
 
 `(geno_file: file, nind: int, nsnp: int, rlen: int)`
 
-* **geno_file**: Opened binary file object.
+* **geno_file**: Opened a binary file object.
 * **nind**: Number of individuals (samples).
 * **nsnp**: Number of SNPs.
 * **rlen**: Row length (in bytes).
@@ -935,7 +942,7 @@ ids, X, snps = adna.load_geno("data/geno.csv")
 
 ### 4.2 load_meta
 
-Read sample annotation table.
+Read the sample annotation table.
 
 **Parameters:**
 
@@ -1029,13 +1036,14 @@ Provides data alignment, missing rate computation, and multiple imputation metho
 
 ### 📋 Function Overview
 
-|      Function Name      |                      Description                       |
-|:-----------------------:|:------------------------------------------------------:|
-|      `align_by_id`      |       Align sample IDs, keeping shared samples.        |
-| `compute_missing_rates` |      Compute missing rates for samples and SNPs.       |
-|   `filter_by_missing`   | Filter samples/SNPs exceeding missing-rate thresholds. |
-|    `impute_missing`     |      Unified missing-value imputation interface.       |
-|  `grouped_imputation`   |         Perform grouped imputation by labels.          |
+|      Function Name       |                            Description                             |
+|:------------------------:|:------------------------------------------------------------------:|
+|      `align_by_id`       |             Align sample IDs, keeping shared samples.              |
+| `compute_missing_rates`  |            Compute missing rates for samples and SNPs.             |
+|   `filter_by_missing`    |       Filter samples/SNPs exceeding missing-rate thresholds.       |
+|  `filter_meta_by_rows`   |          Filter metadata table using a row-selection mask          |
+|     `impute_missing`     |            Unified missing-value imputation interface.             |
+| `clean_labels_and_align` | Clean categorical labels and align them with the embedding matrix. |
 
 ---
 
@@ -1133,9 +1141,10 @@ Filter samples and SNPs by missing rate thresholds.
 
 **Returns:**
 
-`(X_filtered: pd.DataFrame)`
+`(X_filtered: pd.DataFrame, keep_rows: pd.Series)`
 
 * **X_filtered**: Filtered matrix.
+* **keep_rows**: A sample-level boolean mask used for synchronous filtering of meta tags (can be used in conjunction with filter_meta_by_rows).
 
 **Example:**
 
@@ -1155,17 +1164,79 @@ X_filtered = adna.filter_by_missing(X1, sm, cm)
 
 ---
 
-### 5.4 impute_missing
+### 5.4 `filter_meta_by_rows`
+
+Synchronously filter a metadata table using a sample-level boolean mask.
+
+This function is typically used together with `filter_by_missing`.  
+After removing samples with high-missing rates from the genotype matrix, it applies the same sample-level filtering to the metadata table (`meta`), ensuring row-wise alignment between the genotype matrix and the metadata.
+
+**Parameters:**
+
+| Parameter   | Type           | Default | Description                                              |
+|-------------|----------------|---------|----------------------------------------------------------|
+| `meta`      | `pd.DataFrame` |         | Sample metadata table (rows correspond to samples).      |
+| `keep_rows` | `pd.Series`    |         | Sample-level boolean mask (`True` means keep).           |
+| `label`     | `str`          | `meta`  | Label name used only for logging output and diagnostics. |
+
+**Returns:**  
+
+`(meta_filtered: pd.DataFrame)`
+
+- `meta_filtered`: Metadata table filtered according to `keep_rows`, with row order consistent with the filtered genotype matrix.
+
+**Algorithm Logic:**
+
+1. Receive the sample-level boolean mask `keep_rows` returned by `filter_by_missing`;
+2. Apply this mask to filter rows in the metadata table `meta`;
+3. Return the filtered metadata table for downstream analysis.
+
+**Example:**
+```python
+import pandas as pd
+import ancient_dna as adna
+
+X: pd.DataFrame = pd.DataFrame({
+    "SNP1": [0, 1, 3, 1],
+    "SNP2": [1, 3, 0, 1],
+    "SNP3": [3, 3, 1, 0]
+})
+
+meta: pd.DataFrame = pd.DataFrame({
+    "Genetic ID": ["A", "B", "A", "D"],
+    "Y haplogroup": [2, 321, 12312, 421]
+})
+
+sm: pd.Series = pd.Series([0.7, 0.2, 0.4, 0.1])
+cm: pd.Series = pd.Series([0.55, 0.85, 0.16, 0.17])
+
+# Missing-rate filtering already performed
+X_filtered, keep_rows = adna.filter_by_missing(X, sm, cm)
+
+# Synchronously filter metadata
+meta_filtered = adna.filter_meta_by_rows(meta, keep_rows)
+```
+
+**Notes:**
+
+- This function ensures strict consistency between the genotype matrix and the metadata table at the sample level;
+- It is strongly recommended to call this function immediately after filter_by_missing to avoid sample misalignment;
+- This is a helper function that does not modify data values, only performs row-level filtering;
+- Commonly used in downstream dimensionality reduction, clustering, and visualization workflows.
+
+---
+
+### 5.5 impute_missing
 
 Perform missing-value imputation.
 
 **Parameters:**
 
-|   Parameter   |      Type      | Default  |                                                               Description                                                                |
-|:-------------:|:--------------:|:--------:|:----------------------------------------------------------------------------------------------------------------------------------------:|
-|      `X`      | `pd.DataFrame` |          |                                                             Genotype matrix.                                                             |
-|   `method`    |     `str`      | `"mode"` | Imputation method (`mode`, `mean`, `knn`, `knn_hamming`, `knn_hamming_abs`, `knn_hamming_adaptive`, `knn_hybrid_autoalpha`, `knn_auto`). |
-| `n_neighbors` |     `int`      |   `5`    |                                                 Number of neighbors for KNN imputation.                                                  |
+|   Parameter   |      Type      | Default  |                                                 Description                                                 |
+|:-------------:|:--------------:|:--------:|:-----------------------------------------------------------------------------------------------------------:|
+|      `X`      | `pd.DataFrame` |          |                                              Genotype matrix.                                               |
+|   `method`    |     `str`      | `"mode"` | Imputation method (`mode`, `mean`, `knn`, `knn_hamming_abs`,`knn_hamming_adaptive`,`knn_hamming_balltree`). |
+| `n_neighbors` |     `int`      |   `5`    |                                   Number of neighbors for KNN imputation.                                   |
 
 **Returns:**
 
@@ -1189,34 +1260,36 @@ filled = adna.impute_missing(X, method="knn")
 
 ---
 
-### 5.5 grouped_imputation
+### 5.6 clean_labels_and_align
 
-Perform grouped missing-value imputation (wrapped version).
-Based on external labels (e.g., geographic regions or haplogroups), the dataset is divided into subsets, and imputation is performed separately within each group.
-If no labels are provided, a global imputation is applied.
+Clean categorical labels and align them with the embedding matrix.
+
+This function standardizes and filters categorical labels, then subsets and aligns the embedding matrix using the same set of valid sample indices to ensure sample-wise consistency. After filtering, both outputs reset their indices to a continuous integer range.
 
 **Parameters:**
 
-| Parameter |        Type         | Default  |                                          Description                                          |
-|:---------:|:-------------------:|:--------:|:---------------------------------------------------------------------------------------------:|
-|    `X`    |   `pd.DataFrame`    |          |                  Original genotype matrix (rows = samples, columns = SNPs).                   |
-| `labels`  | `pd.Series \| None` |          | External grouping labels (e.g., region or haplogroup). If `None`, performs global imputation. |
-| `method`  |        `str`        | `"mode"` |       Missing-value imputation method (e.g., `"mode"`, `"knn_hamming_adaptive"`, etc.).       |
+|    Parameter     |        Type        | Default |                                Description                                 |
+|:----------------:|:------------------:|:-------:|:--------------------------------------------------------------------------:|
+|      `emb`       |   `pd.DataFrame`   |         |    Embedding matrix (2D or ND), rows = samples, indexed by sample IDs.     |
+|     `labels`     |    `pd.Series`     |         |           Label series indexed by the same sample IDs as `emb`.            |
+|   `collapse_y`   |       `bool`       | `False` |  Collapse Y haplogroup labels into higher-level categories (if relevant).  |
+| `invalid_values` | `iterable \| None` | `None`  | Label values treated as invalid and removed; if `None`, defaults are used. |
+|   `whitelist`    | `iterable \| None` | `None`  |    If provided, only whitelist labels (case-insensitive) are retained.     |
+
 
 **Returns:**
 
-`(filled_X: pd.DataFrame)`
+`(emb_clean: pd.DataFrame, labels_clean: pd.Series)`
 
-* **filled_X**: Fully imputed matrix, index order consistent with the original matrix.
+* **emb_clean**: Filtered and aligned embedding matrix with reset_index(drop=True).
+* **labels_clean**: Cleaned label series aligned with emb_clean, also index-reset.
 
-**Algorithm Steps:**
+**Algorithm Logic:**
 
-1. If `labels=None`, perform global imputation directly.
-2. Otherwise, divide samples into subsets by label.
-3. Apply `impute_missing()` separately to each group.
-4. For small groups (≤5 samples), fallback to column-mode imputation.
-5. If method is `"knn_faiss"` and sample count is too small, fallback to `"mode"`.
-6. Merge all results and restore original index order.
+1. Receive the genotype matrix `X` corresponding to the current sample subset;
+2. Reindex and align the label series `labels` based on the index of `X`;
+3. Remove invalid, missing, or non-alignable label entries;
+4. Return the label series in the same order as the samples, ready for downstream analysis.
 
 **Example:**
 
@@ -1224,16 +1297,29 @@ If no labels are provided, a global imputation is applied.
 import pandas as pd
 import ancient_dna as adna
 
-X = pd.DataFrame({
-    "SNP1": [0, 1, None, 3],
-    "SNP2": [3, None, 1, 0],
-    "SNP3": [1, 3, 3, None]
-})
-labels = pd.Series(["Europe", "Europe", "Asia", "Asia"], name="Region")
+embedding:pd.DataFrame = pd.DataFrame({
+        "SNP1": [0, 1, 3, 1],
+        "SNP2": [1, 3, 0, 1],
+        "SNP3": [3, 3, 1, 0]
+    })
+meta:pd.DataFrame = pd.DataFrame({
+        "Genetic ID": ["A", "B", "A", "D"],
+        "World Zone": [2, 321, 12312, 421]
+    })
 
-filled = adna.grouped_imputation(X, labels=labels, method="mode")
-print(filled)
+# After sample filtering and alignment
+emb_clean, labels_clean = adna.clean_labels_and_align(
+    emb=embedding,
+    labels=meta["World Zone"],
+    collapse_y=False
+)
 ```
+
+**Notes:**
+
+* Labels are cast to strings, stripped, and compared in lowercase for invalid/whitelist filtering.
+* Filtering is string-based and independent of original label dtypes.
+* Outputs reset indices, so returned objects no longer preserve sample-ID indices.
 
 ---
 
@@ -1401,34 +1487,39 @@ This module is used to plot dimensionality reduction scatter plots, missing-data
 
 ### 📋 Function Overview
 
-|        Function Name        |                              Description                               |
-|:---------------------------:|:----------------------------------------------------------------------:|
-|      `plot_embedding`       |               Plot 2D dimensionality reduction results.                |
-|    `plot_missing_values`    |              Visualize missing data distribution matrix.               |
-| `plot_cluster_on_embedding` | Overlay cluster results on embedding and show dominant label & purity. |
-|   `plot_silhouette_trend`   | Plot relationship between cluster number and average silhouette score. |
+|        Function Name         |                              Description                               |
+|:----------------------------:|:----------------------------------------------------------------------:|
+|       `plot_embedding`       |              Plot 2D/3D dimensionality reduction results.              |
+| `plot_embedding_interactive` |             Plotly generates interactive 2D/3D embeddings.             |
+|    `plot_missing_values`     |              Visualize missing data distribution matrix.               |
+| `plot_cluster_on_embedding`  | Overlay cluster results on embedding and show dominant label & purity. |
+|   `plot_silhouette_trend`    | Plot relationship between cluster number and average silhouette score. |
 
 ---
 
 ### 7.1 plot_embedding
 
-Plot 2D embedding scatter plot with customizable legend and color mapping.
-Categories beyond `legend_max` are displayed in gray in both the plot and legend.
+This function plots scatter plots of the dimensionality reduction results, supporting visualization of 2D/3D embeddings and allowing for custom legend positions and color mappings.
+
+When the embedding includes a Dim3 column, the function will automatically plot a 3D scatter plot.
+
+Categories exceeding `legend_max` are represented in gray in both the plot and the legend.
 
 **Parameters:**
 
-|   Parameter    |         Type         |        Default         |                        Description                         |                                       
-|:--------------:|:--------------------:|:----------------------:|:----------------------------------------------------------:| 
-|      `df`      |    `pd.DataFrame`    |                        | Dimensionality reduction result containing `Dim1`, `Dim2`. |                                       
-|    `labels`    |     `pd.Series`      |                        |              Optional classification labels.               |                                       
-|    `title`     |        `str`         |                        |                        Plot title.                         |                                       
-|  `save_path`   | `str\| Path \| None` |                        |           Save path (display directly if None).            |
-|   `figsize`    |       `tuple`        |       `(10, 7)`        |                        Figure size.                        |                                       
-|  `legend_pos`  |        `str`         |       `"right"`        |  Legend position: `right`, `bottom`, `top`, or `inside`.   |                                       
-|     `cmap`     |        `str`         |       `"tab20"`        |                         Colormap.                          |                                       
-|  `legend_max`  |        `int`         |          `20`          |          Maximum number of categories to display.          |                                       
-| `legend_sort`  |        `bool`        |         `True`         |              Whether to sort by sample count.              |                                      
-| `others_color` |       `tuple`        | `(0.7, 0.7, 0.7, 0.5)` |           Color for samples beyond legend limit.           |                                       
+|   Parameter    |         Type         |        Default         |                         Description                          |                                       
+|:--------------:|:--------------------:|:----------------------:|:------------------------------------------------------------:| 
+|      `df`      |    `pd.DataFrame`    |                        |  Dimensionality reduction result containing `Dim1`, `Dim2`.  |                                       
+|    `labels`    |     `pd.Series`      |                        |               Optional classification labels.                |                                       
+|    `title`     |        `str`         |                        |                         Plot title.                          |                                       
+|  `save_path`   | `str\| Path \| None` |                        |            Save path (display directly if None).             |
+|   `figsize`    |       `tuple`        |       `(10, 7)`        |                         Figure size.                         |                                       
+|  `legend_pos`  |        `str`         |       `"right"`        |   Legend position: `right`, `bottom`, `top`, or `inside`.    |                                       
+|     `cmap`     |        `str`         |       `"tab20"`        |                          Colormap.                           |                                       
+|  `legend_max`  |        `int`         |          `20`          |           Maximum number of categories to display.           |                                       
+| `legend_sort`  |        `bool`        |         `True`         |               Whether to sort by sample count.               |                                      
+| `others_color` |       `tuple`        | `(0.7, 0.7, 0.7, 0.5)` |            Color for samples beyond legend limit.            |                                       
+| `draw_others`  |        `bool`        |        `False`         | Whether to draw points belonging to merged "others" classes. |
 
 **Returns:**
 
@@ -1450,7 +1541,73 @@ adna.plot_embedding(embedding, labels=meta, title="UMAP Projection")
 
 ---
 
-### 7.2 plot_missing_values
+### 7.2 plot_embedding_interactive
+
+Render an interactive embedding visualization using Plotly.
+
+This function uses Plotly to generate an interactive 2D or 3D scatter plot of an embedding.
+Each category is rendered as an independent Plotly trace, allowing users to show or hide individual classes via the legend, making it suitable for interactive exploration and presentation.
+
+**Parameters:**
+
+|   Parameter    |         Type          |        Default         |                                              Description                                              |
+|:--------------:|:---------------------:|:----------------------:|:-----------------------------------------------------------------------------------------------------:|
+|      `df`      |    `pd.DataFrame`     |                        |  Reduced embedding data. Must contain `Dim1` and `Dim2`; for 3D embeddings, `Dim3` is also required.  |
+|    `labels`    |      `pd.Series`      |                        |        Categorical labels used for coloring; the index must align with the row order of `df`.         |
+|     `dim`      |     `int \| None`     |         `None`         | Embedding dimensionality (2 or 3). If `None`, inferred automatically based on the presence of `Dim3`. |
+|    `title`     |         `str`         |     `"Projection"`     |                                              Plot title.                                              |
+|  `legend_max`  |         `int`         |          `20`          |     Maximum number of categories shown in the legend; excess categories are merged into “others”.     |
+| `legend_sort`  |        `bool`         |        `False`         |             Whether to sort categories by frequency (passed to the color-mapping logic).              |
+|     `cmap`     |         `str`         |       `"tab20"`        |                Name of the Matplotlib colormap used for standard discrete categories.                 |
+| `others_color` |        `tuple`        | `(0.7, 0.7, 0.7, 0.5)` |                         RGBA color used for categories merged into “others”.                          |
+|  `save_path`   | `str \| Path \| None` |         `None`         |      If provided, the figure is saved as an HTML file; otherwise it is displayed interactively.       |
+
+**Returns:**
+
+`plotly.graph_objects.Figure`
+
+* The generated Plotly Figure object, which can be further customized or embedded.
+
+**Algorithm Logic:**
+
+1. If `dim` is not specified, automatically determine whether to use 2D or 3D based on the presence of `Dim3`;
+2. Convert labels to string type;
+3. Call `_categorical_color_mapping` to generate a category-to-color mapping;
+4. Create one independent Plotly trace per category (`Scatter` for 2D, `Scatter3d` for 3D);
+5. Merge categories exceeding `legend_max` into “others”;
+6. Configure 2D or 3D axis layouts according to `dim`;
+7. If `save_path` is provided, save the figure as an HTML file; otherwise, display it interactively.
+
+**Example:**
+
+```python
+import pandas as pd
+import ancient_dna as adna
+
+embedding = pd.DataFrame({
+    "Dim1": [0.1, 0.3, 0.8, 1.0],
+    "Dim2": [0.2, 0.5, 0.9, 1.2],
+    "Dim3": [0.0, 0.1, 0.2, 0.3]
+})
+labels = pd.Series(["Europe", "Europe", "Asia", "Asia"])
+
+fig = adna.plot_embedding_interactive(
+    embedding,
+    labels=labels,
+    title="Interactive UMAP Projection"
+)
+```
+
+**Notes:**
+
+* This function does not validate or realign `df` and `labels`; they are assumed to already be aligned;
+* The color-mapping logic is shared with `plot_embedding` and follows the same categorical color rules;
+* Rendering each category as a separate trace is the basis for interactive legend control;
+* Intended for exploratory analysis, web-based visualization, and notebook interaction, not for publication-quality static figures.
+
+---
+
+### 7.3 plot_missing_values
 
 Smart visualization of missing data patterns. Automatically switches between detailed pixel visualization (for small matrices) and aggregated missing-rate histograms (for large matrices).
 
@@ -1488,11 +1645,11 @@ adna.plot_missing_values(X, "results/missing_values.png")
 
 ---
 
-### 7.3 plot_cluster_on_embedding
+### 7.4 plot_cluster_on_embedding
 
 Overlay clustering results on embedding visualization.
 Each cluster is annotated with its **Dominant Label** and **Purity (Dominant %)** at the cluster center, providing an intuitive way to evaluate clustering quality and label consistency.
-
+This function supports **2D embeddings only** (Dim1 / Dim2).
 **Parameters:**
 
 |   Parameter    |          Type           |             Default             |                           Description                           |                                                                 
@@ -1559,7 +1716,7 @@ plot_cluster_on_embedding(
 
 ---
 
-### 7.4 plot_silhouette_trend
+### 7.5 plot_silhouette_trend
 
 Plot the **Silhouette Score** trend as the number of clusters changes.
 This helps determine the optimal number of clusters (k) by visualizing silhouette scores for different k values to assess clustering quality and stability.
@@ -1650,6 +1807,7 @@ plot_silhouette_trend(scores, save_path=Path("results/silhouette_trend.png"))
 | **v0.1.0** | 2025-10-16 | First release of API documentation, including core modules like embedding and genotopython. |
 | **v0.1.1** | 2025-10-24 |             Fixed return name errors, incorrect example calls, and minor typos.             |
 | **v0.2.0** | 2025-11-08 |             Added clustering module and functions optimized for large datasets.             |
+| **v0.3.0** | 2025-12-27 |                        Added new functions and corrected parameters                         |
 
 
 
