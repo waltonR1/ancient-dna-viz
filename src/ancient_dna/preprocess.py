@@ -51,13 +51,13 @@ Description
 -----------
 本模块专注于解决基因型矩阵在真实数据场景中
 普遍存在的缺失、不一致和规模受限问题，
-并提供从简单统计方法到高级 KNN / Faiss 的
+并提供从简单统计方法到高级 KNN 的
 多层级、可扩展缺失值填补方案。
 
 The module addresses common issues in real-world genotype datasets,
 including missing values, inconsistencies, and scalability constraints.
 It provides a hierarchical set of imputation strategies,
-ranging from simple statistical methods to advanced KNN and Faiss-based approaches.
+ranging from simple statistical methods to advanced KNN approaches.
 
 模块输出的数据结构被直接用于后续的
 降维（embedding）、聚类（clustering）以及可视化分析流程。
