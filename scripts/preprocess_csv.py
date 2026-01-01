@@ -263,17 +263,19 @@ def main():
 
 
     # === 3. 预留标签列组合（可自由添加/删除） ===
-    # label_columns = [
-    #     "Y haplogroup",
-    #     "World Zone",
-    # ]
     label_columns = [
-        "World Zone"
+        "Y haplogroup",
+        "World Zone",
     ]
+    # label_columns = [
+    #     "World Zone"
+    # ]
 
     # === 4. 需要测试的组合 ===
-    impute_methods = ['knn_hamming_balltree']
-    reduce_methods = ["tsne"]
+    impute_methods = ['mode','mean','knn','knn_hamming_abs','knn_hamming_adaptive','knn_hamming_balltree']
+    reduce_methods = ["umap","tsne","mds","isomap"]
+    # impute_methods = ['knn_hamming_balltree']
+    # reduce_methods = ["tsne"]
 
     runtime_records = []
 
