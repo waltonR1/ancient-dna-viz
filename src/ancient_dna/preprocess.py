@@ -80,6 +80,7 @@ from tqdm import tqdm
 import psutil, time
 from pathlib import Path
 import pyarrow as pa, pyarrow.parquet as pq
+import re
 
 warnings.filterwarnings("ignore", category=pd.errors.SettingWithCopyWarning)
 
@@ -1768,3 +1769,56 @@ def clean_labels_and_align(
         labels_clean = _collapse_y_haplogroup(labels_clean)
 
     return emb_clean, labels_clean
+
+def extract_y_haplogroup_from_locality(metaf: pd.DataFrame) -> pd.DataFrame:
+    """
+    从 Locality 字段中提取 Y.haplogroup 信息，并填补到 Y haplogroup 列中。
+
+    This function scans the 'Locality' column, extracts embedded
+    'Y.haplogroup=...' annotations using regular expressions,
+    and fills the 'Y haplogroup' column accordingly.
+
+    The operation is safe to rerun and will not overwrite
+    existing non-missing Y haplogroup values.
+
+    Parameters
+    ----------
+    metaf : pandas.DataFrame
+        Metadata table containing at least 'Locality' and
+        'Y haplogroup' columns.
+
+    Returns
+    -------
+    pandas.DataFrame
+        Updated metadata table with Y haplogroup filled
+        and Locality cleaned.
+    """
+
+    # 正则：匹配 Y.haplogroup=XXXX（直到下一个逗号）
+    y_pattern = re.compile(r"Y\.haplogroup=([^,]+)")
+
+    # 遍历所有行（显式遍历，便于后续扩展规则）
+    for idx, row in metaf.iterrows():
+        locality = row.get("Locality")
+
+        if not isinstance(locality, str):
+            continue
+
+        match = y_pattern.search(locality)
+        if not match:
+            continue
+
+        y_value = match.group(1).strip()
+
+        # 只在 Y haplogroup 缺失时填补
+        current_y = row.get("Y haplogroup")
+        if pd.isna(current_y) or current_y == "..":
+            metaf.at[idx, "Y haplogroup"] = y_value
+
+        # 同时清洗 Locality（移除 Y.haplogroup 部分）
+        cleaned_locality = y_pattern.sub("", locality)
+        cleaned_locality = re.sub(r",\s*$", "", cleaned_locality).strip()
+
+        metaf.at[idx, "Locality"] = cleaned_locality
+
+    return metaf

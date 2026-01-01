@@ -58,6 +58,8 @@ def main():
     # metaf.to_pickle(processed_dir / "metaf_packed.pkl")
     # metaf = pd.read_pickle(processed_dir / "metaf_packed.pkl")
 
+    metaf = adna.extract_y_haplogroup_from_locality(metaf)
+
     # adna.save_csv(metaf, processed_dir / "metaf_packed.csv")
 
     adna.save_report(adna.build_missing_report(sm, cm), results_dir / "missing_report_packed.csv")
