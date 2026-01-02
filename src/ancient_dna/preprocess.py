@@ -1770,6 +1770,7 @@ def clean_labels_and_align(
 
     return emb_clean, labels_clean
 
+
 def extract_y_haplogroup_from_locality(metaf: pd.DataFrame) -> pd.DataFrame:
     """
     从 Locality 字段中提取 Y.haplogroup 信息，并填补到 Y haplogroup 列中。

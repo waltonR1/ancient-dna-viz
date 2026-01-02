@@ -1036,14 +1036,15 @@ Provides data alignment, missing rate computation, and multiple imputation metho
 
 ### 📋 Function Overview
 
-|      Function Name       |                            Description                             |
-|:------------------------:|:------------------------------------------------------------------:|
-|      `align_by_id`       |             Align sample IDs, keeping shared samples.              |
-| `compute_missing_rates`  |            Compute missing rates for samples and SNPs.             |
-|   `filter_by_missing`    |       Filter samples/SNPs exceeding missing-rate thresholds.       |
-|  `filter_meta_by_rows`   |          Filter metadata table using a row-selection mask          |
-|     `impute_missing`     |            Unified missing-value imputation interface.             |
-| `clean_labels_and_align` | Clean categorical labels and align them with the embedding matrix. |
+|            Function Name             |                                                 Description                                                  |
+|:------------------------------------:|:------------------------------------------------------------------------------------------------------------:|
+|            `align_by_id`             |                                  Align sample IDs, keeping shared samples.                                   |
+|       `compute_missing_rates`        |                                 Compute missing rates for samples and SNPs.                                  |
+|         `filter_by_missing`          |                            Filter samples/SNPs exceeding missing-rate thresholds.                            |
+|        `filter_meta_by_rows`         |                               Filter metadata table using a row-selection mask                               |
+|           `impute_missing`           |                                 Unified missing-value imputation interface.                                  |
+|       `clean_labels_and_align`       |                      Clean categorical labels and align them with the embedding matrix.                      |
+| `extract_y_haplogroup_from_locality` | Extracts embedded Y.haplogroup annotations from the Locality field and safely fills the Y haplogroup column. |
 
 ---
 
@@ -1320,6 +1321,84 @@ emb_clean, labels_clean = adna.clean_labels_and_align(
 * Labels are cast to strings, stripped, and compared in lowercase for invalid/whitelist filtering.
 * Filtering is string-based and independent of original label dtypes.
 * Outputs reset indices, so returned objects no longer preserve sample-ID indices.
+
+---
+
+### 5.7 extract_y_haplogroup_from_locality
+
+Parses and extracts embedded Y haplogroup information (`Y.haplogroup=...`) from the `Locality` field in the metadata table, safely fills it into the `Y haplogroup` column, and cleans the `Locality` field accordingly.
+
+This function is primarily intended to repair or complete metadata in which **Y haplogroup annotations have been mixed into the free-text `Locality` field**, a situation commonly encountered in historically curated or multi-source merged datasets. The function is safe to rerun and will not overwrite existing valid Y haplogroup annotations.
+
+---
+
+**Parameters:**
+
+| Parameter |      Type      | Default |                                     Description                                     |
+|:---------:|:--------------:|:-------:|:-----------------------------------------------------------------------------------:|
+|  `metaf`  | `pd.DataFrame` |         | Metadata table that must contain at least the `Locality` and `Y haplogroup` columns |
+
+---
+
+**Returns:**
+
+`pd.DataFrame`
+
+* Returns the updated metadata table (**modified in place and returned as the same object**), where:
+
+  * `Y haplogroup`: automatically filled when missing
+  * `Locality`: cleaned by removing the `Y.haplogroup=...` fragment and applying basic formatting cleanup
+
+---
+
+**Algorithm logic:**
+
+1. Iterate row by row over the `Locality` column, processing only string values;
+2. Use a regular expression to match annotation fragments of the form `Y.haplogroup=XXXX`;
+3. If a match is found:
+
+   * Extract the haplogroup value (`XXXX`);
+   * **Fill the value only if the current `Y haplogroup` entry is missing or a placeholder (e.g., `".."`)**;
+4. Remove the matched annotation fragment from the `Locality` string and clean trailing commas and whitespace;
+5. Preserve all other metadata fields unchanged and return the updated table.
+
+---
+
+**Example:**
+
+```python
+import pandas as pd
+import ancient_dna as adna
+
+metaf = pd.DataFrame({
+    "Locality": [
+        "Chinese, Sino-Tibetan, Fujian, Y.haplogroup=O3a2c1a",
+        "Tibetic, Bodish, Gannan, Gansu, Y.haplogroup=N",
+        "European, Bronze Age"
+    ],
+    "Y haplogroup": [pd.NA, "..", "R1b"]
+})
+
+metaf = adna.extract_y_haplogroup_from_locality(metaf)
+```
+
+Resulting table (illustrative):
+
+|            Locality            | Y haplogroup |
+|:------------------------------:|:------------:|
+| Chinese, Sino-Tibetan, Fujian  |   O3a2c1a    |
+| Tibetic, Bodish, Gannan, Gansu |      N       |
+|      European, Bronze Age      |     R1b      |
+
+---
+
+**Notes:**
+
+* This function is **idempotent** and can be safely executed multiple times;
+* Existing non-missing `Y haplogroup` values are never overwritten;
+* The regular expression relies only on the `Y.haplogroup=` prefix and is agnostic to specific haplogroup naming conventions;
+* Explicit row-wise iteration is used by design to facilitate future extensions (e.g., X haplogroups, mtDNA, multiple annotation rules);
+* It is recommended to run this function **before downstream analyses** (UMAP, clustering, geographic analysis) to ensure label consistency.
 
 ---
 

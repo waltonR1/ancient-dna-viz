@@ -1032,14 +1032,15 @@ adna.save_csv(X, "/geno_out.csv")
 
 ### 📋 函数总览
 
-|           函数名            |          功能简介          |
-|:------------------------:|:----------------------:|
-|      `align_by_id`       |     对齐样本 ID，保留共有样本     |
-| `compute_missing_rates`  |     计算样本与 SNP 的缺失率     |
-|   `filter_by_missing`    |    按阈值过滤高缺失率样本/SNP     |
-|  `filter_meta_by_rows`   |     根据样本保留掩码过滤元数据表     |
-|     `impute_missing`     |       缺失值填补统一接口        |
-| `clean_labels_and_align` | 清洗分类标签并与 embedding 行对齐 |
+|                 函数名                  |                          功能简介                          |
+|:------------------------------------:|:------------------------------------------------------:|
+|            `align_by_id`             |                     对齐样本 ID，保留共有样本                     |
+|       `compute_missing_rates`        |                     计算样本与 SNP 的缺失率                     |
+|         `filter_by_missing`          |                    按阈值过滤高缺失率样本/SNP                     |
+|        `filter_meta_by_rows`         |                     根据样本保留掩码过滤元数据表                     |
+|           `impute_missing`           |                       缺失值填补统一接口                        |
+|       `clean_labels_and_align`       |                 清洗分类标签并与 embedding 行对齐                 |
+| `extract_y_haplogroup_from_locality` | 从 Locality 字段中提取 Y.haplogroup 信息，并填补到 Y haplogroup 列中。 |
 
 ---
 
@@ -1303,6 +1304,83 @@ emb_clean, labels_clean = adna.clean_labels_and_align(
 - 标签会先转换为字符串并去除首尾空白，匹配时使用小写形式（无效值与白名单均如此）。
 - 过滤基于字符串匹配，不依赖标签原始数据类型。
 - 输出会重建索引（reset_index(drop=True)），因此返回对象的索引不再是样本 ID。
+
+---
+
+### 5.7 extract_y_haplogroup_from_locality 
+
+从元数据表的 `Locality` 字段中解析并提取嵌入的 Y 单倍群信息（`Y.haplogroup=...`），并安全地填补到 `Y haplogroup` 列中，同时对 `Locality` 字段进行清洗。
+
+该函数主要用于修复或补全元数据中 **Y 单倍群信息被混合写入 Locality 文本字段** 的情况，常见于历史整理不规范或多源合并的数据集。函数支持重复执行，不会覆盖已有的有效 Y 单倍群注释。
+
+
+
+**参数：**
+
+|   参数名   |       类型       | 是否默认 |                    说明                     |
+|:-------:|:--------------:|:----:|:-----------------------------------------:|
+| `metaf` | `pd.DataFrame` |      | 元数据表，需至少包含 `Locality` 与 `Y haplogroup` 两列 |
+
+---
+
+**返回：**
+
+`pd.DataFrame`
+
+* 返回更新后的元数据表（**原地修改并返回同一对象**），其中：
+
+  * `Y haplogroup`：在缺失的情况下被自动填补
+  * `Locality`：已移除 `Y.haplogroup=...` 片段并做基础清洗
+
+---
+
+**算法逻辑：**
+
+1. 对 `Locality` 列逐行扫描，仅处理字符串类型值；
+2. 使用正则表达式匹配形如 `Y.haplogroup=XXXX` 的注释片段；
+3. 若匹配成功：
+
+   * 提取单倍群值（`XXXX`）；
+   * **仅当 `Y haplogroup` 当前为空或为占位值（如 `".."`）时**，才进行填补；
+4. 同时从 `Locality` 字符串中移除该注释片段，并清理多余逗号与空白；
+5. 保留其他原始信息不变，返回更新后的元数据表。
+
+---
+
+**示例：**
+
+```python
+import pandas as pd
+import ancient_dna as adna
+
+metaf = pd.DataFrame({
+    "Locality": [
+        "Chinese, Sino-Tibetan, Fujian, Y.haplogroup=O3a2c1a",
+        "Tibetic, Bodish, Gannan, Gansu, Y.haplogroup=N",
+        "European, Bronze Age"
+    ],
+    "Y haplogroup": [pd.NA, "..", "R1b"]
+})
+
+metaf = adna.extract_y_haplogroup_from_locality(metaf)
+```
+
+执行后结果示意：
+
+|             Locality             |  Y haplogroup  |
+|:--------------------------------:|:--------------:|
+|  Chinese, Sino-Tibetan, Fujian   |    O3a2c1a     |
+|  Tibetic, Bodish, Gannan, Gansu  |       N        |
+|       European, Bronze Age       |      R1b       |
+
+
+**说明：**
+
+* 该函数是 **幂等（idempotent）** 的，可安全多次运行；
+* 不会覆盖已有的非缺失 `Y haplogroup` 值；
+* 正则匹配仅依赖 `Y.haplogroup=` 前缀，对具体命名体系保持中立；
+* 设计为显式逐行遍历，便于未来扩展（如支持 X 单倍群、mtDNA、多个注释规则等）；
+* 推荐在 **下游分析（UMAP、聚类、地理分析）之前** 执行，以确保标签一致性。
 
 ---
 
